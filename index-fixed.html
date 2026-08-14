@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14823b">
+<title>Thursday Soccer</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f7f5;margin:0;color:#152018}
+.app{max-width:720px;margin:auto;padding:16px}
+.card{background:white;border-radius:18px;padding:16px;margin:12px 0;box-shadow:0 2px 10px #0001}
+h1{text-align:center} input,button{font:inherit}
+input{width:100%;padding:12px;border:1px solid #ccd4cd;border-radius:12px;box-sizing:border-box}
+button{border:0;border-radius:12px;padding:10px 14px;font-weight:700}
+.primary{background:#14823b;color:white}.danger{background:#ffecec;color:#a22}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.player{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #eee}
+.ok{color:#14823b}.bad{color:#b33}.muted{color:#6d746f;font-size:13px}.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="app">
+<h1>⚽ Thursday Soccer</h1>
+
+<div class="card">
+  <b id="summary">Loading...</b>
+  <div class="muted" id="weekText"></div>
+</div>
+
+<div class="card" id="loginCard">
+  <h3>Admin Login</h3>
+  <input id="email" type="email" placeholder="Admin Email">
+  <button class="primary" style="margin-top:10px;width:100%" onclick="login()">Send Login Link</button>
+  <div class="muted" style="margin-top:8px">Only the admin signs in to make changes. Everyone else can view the payment status.</div>
+</div>
+
+<div class="card hidden" id="adminCard">
+  <div class="row"><b>Admin</b><button onclick="logout()">Sign Out</button></div>
+  <div class="row" style="margin-top:12px">
+    <input id="newPlayer" placeholder="Player name">
+    <button class="primary" onclick="addPlayer()">Add</button>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Players</h3>
+  <div id="players"></div>
+</div>
+</div>
+
+<script>
+const SB_URL = "https://aacbfebgypzrnvgcrrta.supabase.co";
+const SB_KEY = "sb_publishable_Sk-be4OXcsyglT8HsEqngw_GLVQzZ-5";
+const sb = supabase.createClient(SB_URL, SB_KEY);
+
+let session=null, team=null, week=null, players=[], payments=[], channel=null;
+
+function setStatus(message, isError=false){
+  const el=document.getElementById('summary');
+  el.textContent=message;
+  el.style.color=isError ? '#b33' : '#152018';
+}
+
+function mondayISO(){
+  const d=new Date();
+  const day=(d.getDay()+6)%7;
+  d.setDate(d.getDate()-day);
+  return d.toISOString().slice(0,10);
+}
+
+async function login(){
+  const email=document.getElementById('email').value.trim();
+  if(!email) return alert('Enter your email.');
+  setStatus('Sending login link...');
+  try{
+    const {error}=await sb.auth.signInWithOtp({
+      email,
+      options:{emailRedirectTo:window.location.origin + window.location.pathname}
+    });
+    if(error){
+      setStatus('Login error: ' + error.message, true);
+      alert(error.message);
+    }else{
+      setStatus('Login link sent. Check your email.');
+      alert('A login link was sent to your email.');
+    }
+  }catch(e){
+    setStatus('Login error: ' + (e?.message || e), true);
+  }
+}
+
+async function logout(){
+  await sb.auth.signOut();
+  location.reload();
+}
+
+async function ensureOwnerData(){
+  if(!session) return;
+  let {data:owned,error:ownedError}=await sb.from('teams')
+    .select('*').eq('owner_id',session.user.id).maybeSingle();
+  if(ownedError) throw ownedError;
+
+  if(!owned){
+    const {data:newTeam,error}=await sb.from('teams').insert({
+      name:'Thursday Soccer',
+      weekly_fee:10,
+      owner_id:session.user.id
+    }).select().single();
+    if(error) throw error;
+    owned=newTeam;
+  }
+  team=owned;
+  await ensureWeek();
+}
+
+async function ensureWeek(){
+  if(!team) return;
+  const start=mondayISO();
+  let {data:w,error:wError}=await sb.from('weeks')
+    .select('*').eq('team_id',team.id).eq('starts_on',start).maybeSingle();
+  if(wError) throw wError;
+
+  if(!w && session && team.owner_id===session.user.id){
+    const r=await sb.from('weeks').insert({
+      team_id:team.id,
+      starts_on:start,
+      label:start
+    }).select().single();
+    if(r.error) throw r.error;
+    w=r.data;
+  }
+  week=w;
+}
+
+async function load(){
+  setStatus('Loading...');
+  try{
+    const auth=await sb.auth.getSession();
+    if(auth.error) throw auth.error;
+    session=auth.data.session;
+
+    document.getElementById('loginCard').classList.toggle('hidden',!!session);
+    document.getElementById('adminCard').classList.toggle('hidden',!session);
+
+    if(session) await ensureOwnerData();
+
+    if(!team){
+      const r=await sb.from('teams').select('*').order('created_at',{ascending:true}).limit(1).maybeSingle();
+      if(r.error) throw r.error;
+      team=r.data;
+    }
+
+    if(!team){
+      setStatus('No team has been created yet.');
+      document.getElementById('weekText').textContent='Admin: sign in to create Thursday Soccer.';
+      return;
+    }
+
+    await ensureWeek();
+
+    const p=await sb.from('players')
+      .select('*').eq('team_id',team.id).eq('active',true).order('created_at');
+    if(p.error) throw p.error;
+    players=p.data||[];
+
+    payments=[];
+    if(week){
+      const pay=await sb.from('payments').select('*').eq('week_id',week.id);
+      if(pay.error) throw pay.error;
+      payments=pay.data||[];
+    }
+
+    render();
+    subscribe();
+  }catch(e){
+    console.error(e);
+    setStatus('Connection error: ' + (e?.message || e), true);
+    document.getElementById('weekText').textContent='Refresh the page after checking the connection.';
+  }
+}
+
+function render(){
+  const paidIds=new Set(payments.map(x=>x.player_id));
+  const collected=payments.reduce((s,x)=>s+Number(x.amount),0);
+
+  document.getElementById('summary').textContent =
+    paidIds.size + '/' + players.length + ' Paid • $' + collected + ' Collected';
+
+  document.getElementById('weekText').textContent =
+    week ? ('Week of ' + week.starts_on + ' • $' + team.weekly_fee + ' per player') : 'The current week has not been created yet.';
+
+  const isOwner=session && team && session.user.id===team.owner_id;
+
+  document.getElementById('players').innerHTML =
+    players.map(p => {
+      const paid=paidIds.has(p.id);
+      const action=isOwner
+        ? (paid
+          ? '<button class="danger" onclick="unpay(\\''+p.id+'\\')">Mark Unpaid</button>'
+          : '<button class="primary" onclick="pay(\\''+p.id+'\\')">Mark Paid</button>')
+        : '';
+
+      return '<div class="player">' +
+        '<div><b>'+escapeHtml(p.name)+'</b>' +
+        '<div class="'+(paid?'ok':'bad')+'">'+(paid?'✅ Paid':'❌ Unpaid')+'</div></div>' +
+        action +
+        '</div>';
+    }).join('') || '<div class="muted">هنوز بازیکنی Add نشده.</div>';
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g,c=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+async function addPlayer(){
+  if(!session||!team) return;
+  const input=document.getElementById('newPlayer');
+  const name=input.value.trim();
+  if(!name) return;
+
+  const r=await sb.from('players').insert({team_id:team.id,name});
+  if(r.error) alert(r.error.message);
+  input.value='';
+  await load();
+}
+
+async function pay(player_id){
+  if(!session||!week) return;
+  const r=await sb.from('payments').insert({
+    team_id:team.id,
+    week_id:week.id,
+    player_id,
+    amount:team.weekly_fee,
+    method:'other',
+    created_by:session.user.id
+  });
+  if(r.error) alert(r.error.message);
+  else await load();
+}
+
+async function unpay(player_id){
+  if(!session||!week) return;
+  const r=await sb.from('payments').delete()
+    .eq('week_id',week.id).eq('player_id',player_id);
+  if(r.error) alert(r.error.message);
+  else await load();
+}
+
+function subscribe(){
+  if(channel) return;
+  channel=sb.channel('thursday-soccer-live')
+    .on('postgres_changes',{event:'*',schema:'public',table:'players'},()=>refreshData())
+    .on('postgres_changes',{event:'*',schema:'public',table:'payments'},()=>refreshData())
+    .subscribe();
+}
+
+async function refreshData(){
+  try{
+    if(!team) return;
+    const p=await sb.from('players').select('*').eq('team_id',team.id).eq('active',true).order('created_at');
+    if(p.error) throw p.error;
+    players=p.data||[];
+
+    payments=[];
+    if(week){
+      const pay=await sb.from('payments').select('*').eq('week_id',week.id);
+      if(pay.error) throw pay.error;
+      payments=pay.data||[];
+    }
+    render();
+  }catch(e){
+    setStatus('Connection error: ' + (e?.message || e), true);
+  }
+}
+
+load();
+</script>
+</body>
+</html>
