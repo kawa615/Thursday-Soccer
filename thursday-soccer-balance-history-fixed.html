@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14823b">
+<title>Thursday Soccer</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f7f5;margin:0;color:#152018}
+.app{max-width:720px;margin:auto;padding:16px}
+.card{background:white;border-radius:18px;padding:16px;margin:12px 0;box-shadow:0 2px 10px #0001}
+h1{text-align:center;font-size:40px}
+input,select,button{font:inherit}
+input,select{width:100%;padding:14px;border:1px solid #ccd4cd;border-radius:12px;box-sizing:border-box;font-size:18px;background:#fff}
+button{border:0;border-radius:12px;padding:12px 14px;font-weight:700}
+button:disabled{opacity:.45}
+.primary{background:#14823b;color:white}.danger{background:#ffecec;color:#a22}.secondary{background:#edf4ee;color:#145c2d}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.player{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #eee}
+.ok{color:#14823b}.bad{color:#b33}.muted{color:#6d746f;font-size:13px}.hidden{display:none}
+.status{font-weight:700}
+.money-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.money-box{background:#f5f7f5;border-radius:12px;padding:12px}
+.money-box span{display:block;font-size:12px;color:#6d746f}
+.money-box b{font-size:20px}
+.pay-choice{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+@media(max-width:520px){.pay-choice{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+<h1>⚽ Thursday Soccer</h1>
+
+<div class="card">
+  <div id="summary" class="status">Loading...</div>
+  <div id="weekText" class="muted"></div>
+  <div id="financeCard" class="money-grid hidden">
+    <div class="money-box"><span>Balance from Last Week</span><b id="openingBalance">$0</b></div>
+    <div class="money-box"><span>This Week Collected</span><b id="collectedAmount">$0</b></div>
+    <div class="money-box"><span>Field Rent</span><b id="fieldRent">$120</b></div>
+    <div class="money-box"><span>New Balance</span><b id="newBalance">$0</b></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Week History</h2>
+  <div class="muted">Choose a week to see who paid and who did not.</div>
+  <select id="weekSelect" style="margin-top:10px" onchange="changeWeek(this.value)">
+    <option value="">Loading weeks...</option>
+  </select>
+</div>
+
+<div class="card" id="payCard">
+  <h2>Pay $10</h2>
+  <div class="muted" style="margin-bottom:8px">Choose your name first, then choose a payment method.</div>
+  <select id="payerSelect" onchange="updatePayerStatus()">
+    <option value="">Select your name</option>
+  </select>
+  <div id="payerStatus" class="muted" style="margin-top:8px">Select your name to continue.</div>
+  <div class="pay-choice">
+    <button id="cashPayBtn" class="primary" disabled onclick="openCashApp()">Pay $10 with Cash App</button>
+    <button id="venmoPayBtn" class="primary" disabled onclick="openVenmo()">Pay $10 with Venmo</button>
+  </div>
+  <div class="muted" style="margin-top:8px">After you pay, the admin confirms your payment on the player list.</div>
+</div>
+
+<div class="card">
+  <h2>Players</h2>
+  <div id="players"></div>
+</div>
+
+<div class="card" id="loginCard">
+  <h2>Admin Login</h2>
+  <input id="email" type="email" placeholder="Admin Email">
+  <button class="primary" style="margin-top:10px;width:100%" onclick="sendLogin()">Send Login Link</button>
+  <div class="muted" style="margin-top:8px">Only the admin signs in to make changes.</div>
+</div>
+
+<div class="card hidden" id="adminCard">
+  <div class="row"><b>Admin</b><button onclick="signOut()">Sign Out</button></div>
+  <button class="secondary" style="margin-top:12px;width:100%" onclick="copyGroupLink()">Copy Group Payment Link</button>
+  <div class="row" style="margin-top:12px">
+    <input id="newPlayer" placeholder="Player name">
+    <button class="primary" onclick="addPlayer()">Add</button>
+  </div>
+  <h3 style="margin-top:22px">Week Settings</h3>
+  <div class="muted" style="margin-bottom:8px">Choose the Thursday game date.</div>
+  <input id="weekDateInput" type="date">
+  <button class="primary" style="margin-top:10px;width:100%" onclick="createOrOpenWeek()">Create / Open Week</button>
+
+  <h3 style="margin-top:22px">Balance Settings</h3>
+  <input id="openingBalanceInput" type="number" step="0.01" placeholder="Balance from Last Week">
+  <input id="fieldRentInput" type="number" step="0.01" placeholder="Field Rent" style="margin-top:8px">
+  <button class="primary" style="margin-top:10px;width:100%" onclick="saveBalanceSettings()">Save Balance</button>
+
+  <h3 style="margin-top:22px">Payment Settings</h3>
+  <input id="cashTag" placeholder="Cash App $Cashtag">
+  <input id="venmoUrl" placeholder="Venmo link (https://venmo.com/...)" style="margin-top:8px">
+  <button class="primary" style="margin-top:10px;width:100%" onclick="savePaymentSettings()">Save Payment Settings</button>
+</div>
+</div>
+
+<script>
+const SB_URL="https://aacbfebgypzrnvgcrrta.supabase.co";
+const SB_KEY="sb_publishable_Sk-be4OXcsyglT8HsEqngw_GLVQzZ-5";
+let accessToken=localStorage.getItem("ts_access_token")||"";
+let userId=localStorage.getItem("ts_user_id")||"";
+let team=null,week=null,weeks=[],players=[],payments=[],weekRoster=[];
+function setStatus(msg,error=false){const e=document.getElementById("summary");e.textContent=msg;e.style.color=error?"#b33":"#152018"}
+function money(n){return "$"+Number(n||0).toFixed(2).replace(".00","")}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function thursdayISO(){
+  const d=new Date();
+  const day=d.getDay();
+  let diff=4-day;
+  if(diff<0)diff+=7;
+  d.setDate(d.getDate()+diff);
+  return d.toISOString().slice(0,10);
+}
+function formatGameDate(iso){
+  if(!iso)return "";
+  const d=new Date(iso+"T12:00:00");
+  return d.toLocaleDateString("en-US",{
+    weekday:"long",
+    month:"short",
+    day:"numeric",
+    year:"numeric"
+  });
+}
+function decodeJwt(token){try{const part=token.split(".")[1];const json=decodeURIComponent(atob(part.replace(/-/g,'+').replace(/_/g,'/')).split('').map(c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''));return JSON.parse(json)}catch(e){return null}}
+function captureLoginFromUrl(){if(location.hash.includes("access_token=")){const p=new URLSearchParams(location.hash.slice(1));const token=p.get("access_token");if(token){accessToken=token;const jwt=decodeJwt(token);if(jwt?.sub)userId=jwt.sub;localStorage.setItem("ts_access_token",accessToken);localStorage.setItem("ts_user_id",userId);history.replaceState(null,"",location.pathname)}}}
+async function api(path,options={}){const headers={"apikey":SB_KEY,"Content-Type":"application/json","Prefer":options.prefer||"return=representation"};if(accessToken)headers["Authorization"]="Bearer "+accessToken;const res=await fetch(SB_URL+path,{method:options.method||"GET",headers,body:options.body?JSON.stringify(options.body):undefined});const text=await res.text();let data=null;try{data=text?JSON.parse(text):null}catch(e){data=text}if(!res.ok){const msg=(data&&(data.message||data.msg||data.error_description||data.error))||("HTTP "+res.status);throw new Error(msg)}return data}
+async function sendLogin(){const email=document.getElementById("email").value.trim();if(!email)return alert("Enter your email.");setStatus("Sending login link...");try{const res=await fetch(SB_URL+"/auth/v1/otp?redirect_to="+encodeURIComponent(location.origin+location.pathname),{method:"POST",headers:{"apikey":SB_KEY,"Content-Type":"application/json"},body:JSON.stringify({email,create_user:true})});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.msg||data.message||data.error_description||"Could not send email");setStatus("Login link sent. Check your email.");alert("A login link was sent to your email.")}catch(e){setStatus("Login error: "+e.message,true);alert(e.message)}}
+function signOut(){localStorage.removeItem("ts_access_token");localStorage.removeItem("ts_user_id");accessToken="";userId="";location.reload()}
+async function calculateOpeningBalance(start){const previousWeeks=await api("/rest/v1/weeks?team_id=eq."+team.id+"&starts_on=lt."+start+"&select=id,starts_on,field_rent,opening_balance&order=starts_on.desc&limit=1");if(!previousWeeks.length)return 0;const prev=previousWeeks[0];const prevPayments=await api("/rest/v1/payments?week_id=eq."+prev.id+"&select=amount");const prevCollected=prevPayments.reduce((sum,payment)=>sum+Number(payment.amount),0);return Number(prev.opening_balance||0)+prevCollected-Number(prev.field_rent||120)}
+async function ensureTeamAndWeek(){
+  if(userId){
+    let owned=await api(
+      "/rest/v1/teams?owner_id=eq."+encodeURIComponent(userId)+"&select=*&limit=1"
+    );
+
+    if(!owned.length){
+      owned=await api("/rest/v1/teams",{
+        method:"POST",
+        body:{name:"Thursday Soccer",weekly_fee:10,owner_id:userId}
+      });
+    }
+    team=owned[0];
+  }
+
+  if(!team){
+    const list=await api("/rest/v1/teams?select=*&order=created_at.asc&limit=1");
+    if(list.length)team=list[0];
+  }
+
+  if(!team)return;
+
+  weeks=await api(
+    "/rest/v1/weeks?team_id=eq."+team.id+
+    "&select=*"+
+    "&order=starts_on.desc"
+  );
+
+  if(!weeks.length && userId && team.owner_id===userId){
+    const start=thursdayISO();
+    const created=await api("/rest/v1/weeks",{
+      method:"POST",
+      body:{
+        team_id:team.id,
+        starts_on:start,
+        label:start,
+        field_rent:120,
+        opening_balance:0
+      }
+    });
+    weeks=created;
+  }
+
+  week=weeks[0]||null;
+}
+async function load(){
+  captureLoginFromUrl();
+  document.getElementById("loginCard").classList.toggle("hidden",!!userId);
+  document.getElementById("adminCard").classList.toggle("hidden",!userId);
+  setStatus("Loading...");
+
+  try{
+    await ensureTeamAndWeek();
+
+    if(!team){
+      setStatus("No team has been created yet.");
+      document.getElementById("weekText").textContent="Admin: sign in to create Thursday Soccer.";
+      return;
+    }
+
+    const allPlayers=await api(
+      "/rest/v1/players?team_id=eq."+team.id+
+      "&select=*"+
+      "&order=created_at.asc"
+    );
+
+    payments=week
+      ? await api("/rest/v1/payments?week_id=eq."+week.id+"&select=*")
+      : [];
+
+    weekRoster=week
+      ? await api("/rest/v1/week_players?week_id=eq."+week.id+"&select=player_id")
+      : [];
+
+    const rosterIds=new Set(weekRoster.map(r=>r.player_id));
+    players=allPlayers.filter(p=>rosterIds.has(p.id));
+
+    render();
+  }catch(e){
+    setStatus("Connection error: "+e.message,true);
+    document.getElementById("weekText").textContent="Please refresh after checking the connection.";
+  }
+}
+
+function render(){
+  const paidIds=new Set(payments.map(x=>x.player_id));
+
+  const cashInput=document.getElementById("cashTag");
+  const venmoInput=document.getElementById("venmoUrl");
+  if(cashInput)cashInput.value=team?.cash_tag||"";
+  if(venmoInput)venmoInput.value=team?.venmo_url||"";
+
+  const openingInput=document.getElementById("openingBalanceInput");
+  const rentInput=document.getElementById("fieldRentInput");
+  if(openingInput&&week)openingInput.value=Number(week.opening_balance||0);
+  if(rentInput&&week)rentInput.value=Number(week.field_rent||120);
+
+  const collected=payments.reduce((sum,x)=>sum+Number(x.amount),0);
+
+  setStatus(paidIds.size+"/"+players.length+" Paid • "+money(collected)+" Collected");
+
+  const weekLabel=week
+    ? (typeof formatGameDate==="function"
+        ? "Game date: "+formatGameDate(week.starts_on)+" • "+money(team.weekly_fee)+" per player"
+        : "Week of "+week.starts_on+" • "+money(team.weekly_fee)+" per player")
+    : "Current week not created yet";
+  document.getElementById("weekText").textContent=weekLabel;
+
+  const finance=document.getElementById("financeCard");
+  if(finance){
+    finance.classList.toggle("hidden",!week);
+    if(week){
+      const opening=Number(week.opening_balance||0);
+      const rent=Number(week.field_rent||120);
+      const balance=opening+collected-rent;
+      document.getElementById("openingBalance").textContent=money(opening);
+      document.getElementById("collectedAmount").textContent=money(collected);
+      document.getElementById("fieldRent").textContent=money(rent);
+      document.getElementById("newBalance").textContent=money(balance);
+      document.getElementById("newBalance").className=balance>=0?"ok":"bad";
+    }
+  }
+
+  const weekSelect=document.getElementById("weekSelect");
+  if(weekSelect&&Array.isArray(weeks)){
+    weekSelect.innerHTML=weeks.length
+      ? weeks.map(w=>'<option value="'+w.id+'">'+
+          (typeof formatGameDate==="function"?formatGameDate(w.starts_on):w.starts_on)+
+        '</option>').join("")
+      : '<option value="">No weeks yet</option>';
+    if(week)weekSelect.value=week.id;
+  }
+
+  const weekDateInput=document.getElementById("weekDateInput");
+  if(weekDateInput&&week)weekDateInput.value=week.starts_on;
+
+  const payerSelect=document.getElementById("payerSelect");
+  if(payerSelect){
+    const currentSelection=payerSelect.value;
+    payerSelect.innerHTML='<option value="">Select your name</option>'+
+      players.map(p=>'<option value="'+p.id+'">'+escapeHtml(p.name)+'</option>').join("");
+    if(players.some(p=>p.id===currentSelection))payerSelect.value=currentSelection;
+    if(typeof updatePayerStatus==="function")updatePayerStatus();
+  }
+
+  const isOwner=userId&&team.owner_id===userId;
+
+  document.getElementById("players").innerHTML=players.length
+    ? players.map(p=>{
+        const paid=paidIds.has(p.id);
+        let action="";
+
+        if(isOwner){
+          const paidButton=paid
+            ? `<button class="danger" onclick="markUnpaid('${p.id}')">Mark Unpaid</button>`
+            : `<button class="primary" onclick="markPaid('${p.id}')">Mark Paid</button>`;
+
+          action=`
+            <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+              ${paidButton}
+              <button class="secondary" onclick="renamePlayer('${p.id}')">Edit Name</button>
+              <button class="danger" onclick="removeFromWeek('${p.id}')">Remove This Week</button>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="player">
+            <div>
+              <b>${escapeHtml(p.name)}</b>
+              <div class="${paid?"ok":"bad"}">${paid?"✅ Paid":"❌ Unpaid"}</div>
+            </div>
+            ${action}
+          </div>
+        `;
+      }).join("")
+    : '<div class="muted">No players added for this week.</div>';
+}
+
+async function changeWeek(weekId){
+  if(!weekId)return;
+
+  const selected=weeks.find(w=>String(w.id)===String(weekId));
+  if(!selected)return;
+
+  week=selected;
+
+  try{
+    const allPlayers=await api(
+      "/rest/v1/players?team_id=eq."+team.id+
+      "&select=*"+
+      "&order=created_at.asc"
+    );
+
+    payments=await api(
+      "/rest/v1/payments?week_id=eq."+week.id+"&select=*"
+    );
+
+    weekRoster=await api(
+      "/rest/v1/week_players?week_id=eq."+week.id+"&select=player_id"
+    );
+
+    const rosterIds=new Set(weekRoster.map(r=>r.player_id));
+    players=allPlayers.filter(p=>rosterIds.has(p.id));
+
+    render();
+  }catch(e){
+    alert(e.message);
+  }
+}
+
+async function saveBalanceSettings(){
+  if(!team||!week||!userId)return;
+
+  const opening=Number(document.getElementById("openingBalanceInput").value);
+  const rent=Number(document.getElementById("fieldRentInput").value);
+
+  if(!Number.isFinite(opening)||!Number.isFinite(rent)||rent<0){
+    return alert("Enter valid balance and field rent amounts.");
+  }
+
+  try{
+    const rows=await api("/rest/v1/weeks?id=eq."+week.id,{
+      method:"PATCH",
+      body:{opening_balance:opening,field_rent:rent}
+    });
+
+    if(rows&&rows.length)week=rows[0];
+    else{
+      week.opening_balance=opening;
+      week.field_rent=rent;
+    }
+
+    render();
+    alert("Balance saved.");
+  }catch(e){
+    alert(e.message);
+  }
+}
+async function savePaymentSettings(){if(!team||!userId)return;const cashTag=document.getElementById("cashTag").value.trim().replace(/^\$/,"");const venmoUrl=document.getElementById("venmoUrl").value.trim();try{await api("/rest/v1/teams?id=eq."+team.id,{method:"PATCH",body:{cash_tag:cashTag||null,venmo_url:venmoUrl||null}});team.cash_tag=cashTag||null;team.venmo_url=venmoUrl||null;updatePayerStatus();alert("Payment settings saved.")}catch(e){alert(e.message)}}
+function openCashApp(){const player=selectedPlayer();if(!player)return alert("Select your name first.");if(!team?.cash_tag)return alert("Cash App is not set up yet.");const tag=String(team.cash_tag).replace(/^\$/,"");const amount=Number(team.weekly_fee||10);location.href="https://cash.app/$"+encodeURIComponent(tag)+"/"+amount}
+function openVenmo(){const player=selectedPlayer();if(!player)return alert("Select your name first.");if(!team?.venmo_url)return alert("Venmo is not set up yet.");location.href=team.venmo_url}
+async function copyGroupLink(){const link=location.origin+location.pathname;try{await navigator.clipboard.writeText(link);alert("Group payment link copied.")}catch(e){prompt("Copy this link:",link)}}
+async function addPlayer(){
+  const input=document.getElementById("newPlayer");
+  const name=input.value.trim();
+
+  if(!name||!team||!userId||!week)return;
+
+  try{
+    const created=await api("/rest/v1/players",{
+      method:"POST",
+      body:{team_id:team.id,name,active:true}
+    });
+
+    const player=created[0];
+
+    await api("/rest/v1/week_players",{
+      method:"POST",
+      body:{week_id:week.id,player_id:player.id}
+    });
+
+    input.value="";
+    await load();
+  }catch(e){
+    alert(e.message);
+  }
+}
+
+async function renamePlayer(playerId){
+  if(!userId)return;
+
+  const player=players.find(p=>p.id===playerId);
+  if(!player)return;
+
+  const newName=prompt("New player name:",player.name);
+  if(newName===null)return;
+
+  const clean=newName.trim();
+  if(!clean)return alert("Name cannot be empty.");
+
+  try{
+    await api("/rest/v1/players?id=eq."+playerId,{
+      method:"PATCH",
+      body:{name:clean}
+    });
+    await load();
+  }catch(e){
+    alert(e.message);
+  }
+}
+
+async function removeFromWeek(playerId){
+  if(!userId||!week)return;
+
+  const player=players.find(p=>p.id===playerId);
+  if(!player)return;
+
+  const ok=confirm(
+    "Remove "+player.name+" from this week? Old week history will stay saved."
+  );
+  if(!ok)return;
+
+  try{
+    await api(
+      "/rest/v1/week_players?week_id=eq."+week.id+"&player_id=eq."+playerId,
+      {method:"DELETE"}
+    );
+
+    await api(
+      "/rest/v1/payments?week_id=eq."+week.id+"&player_id=eq."+playerId,
+      {method:"DELETE"}
+    );
+
+    await load();
+  }catch(e){
+    alert(e.message);
+  }
+}
+
+async function markPaid(player_id){if(!team||!week||!userId)return;try{await api("/rest/v1/payments",{method:"POST",body:{team_id:team.id,week_id:week.id,player_id,amount:team.weekly_fee,method:"other",created_by:userId}});await load()}catch(e){alert(e.message)}}
+async function markUnpaid(player_id){if(!week||!userId)return;try{await api("/rest/v1/payments?week_id=eq."+week.id+"&player_id=eq."+player_id,{method:"DELETE"});await load()}catch(e){alert(e.message)}}
+load();
+</script>
+</body>
+</html>
