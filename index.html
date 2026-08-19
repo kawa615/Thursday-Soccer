@@ -82,6 +82,8 @@ button:disabled{opacity:.45}
   <input id="email" type="email" placeholder="Admin Email">
   <input id="password" type="password" placeholder="Password" style="margin-top:8px">
   <button class="primary" style="margin-top:10px;width:100%" onclick="passwordLogin()">Sign In</button>
+  <button class="secondary" style="margin-top:8px;width:100%" onclick="requestPasswordReset()">Forgot Password?</button>
+  <div id="resetRequestStatus" class="muted" style="margin-top:8px"></div>
   <div class="muted" style="margin-top:8px">Admin signs in with email and password.</div>
 </div>
 
@@ -96,6 +98,8 @@ button:disabled{opacity:.45}
   <div class="muted" style="margin-bottom:8px">Choose the Thursday game date.</div>
   <input id="weekDateInput" type="date">
   <button class="primary" style="margin-top:10px;width:100%" onclick="createOrOpenWeek()">Create / Open Week</button>
+  <button class="secondary" style="margin-top:8px;width:100%" onclick="updateWeekDate()">Save New Week Date</button>
+  <button class="danger" style="margin-top:8px;width:100%" onclick="deleteSelectedWeek()">Delete Selected Week</button>
 
   <h3 style="margin-top:22px">Balance Settings</h3>
   <input id="openingBalanceInput" type="number" step="0.01" placeholder="Balance from Last Week">
@@ -266,6 +270,52 @@ async function passwordLogin(){
   }catch(e){
     setStatus("Login error: "+e.message,true);
     alert(e.message);
+  }
+}
+
+async function requestPasswordReset(){
+  const email=document.getElementById("email").value.trim();
+  const status=document.getElementById("resetRequestStatus");
+
+  if(!email){
+    status.textContent="Enter your admin email first.";
+    status.style.color="#b33";
+    document.getElementById("email").focus();
+    return;
+  }
+
+  status.textContent="Sending reset email...";
+  status.style.color="#6d746f";
+
+  try{
+    const redirectTo=location.origin+location.pathname;
+    const res=await fetch(
+      SB_URL+"/auth/v1/recover?redirect_to="+encodeURIComponent(redirectTo),
+      {
+        method:"POST",
+        headers:{
+          "apikey":SB_KEY,
+          "Content-Type":"application/json"
+        },
+        body:JSON.stringify({email})
+      }
+    );
+
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok){
+      throw new Error(
+        data.msg||
+        data.message||
+        data.error_description||
+        "Could not send reset email"
+      );
+    }
+
+    status.textContent="Reset email sent. Check your inbox and spam folder.";
+    status.style.color="#14823b";
+  }catch(e){
+    status.textContent="Reset error: "+e.message;
+    status.style.color="#b33";
   }
 }
 
@@ -500,6 +550,52 @@ async function changeWeek(weekId){
     render();
   }catch(e){
     alert(e.message);
+  }
+}
+
+async function updateWeekDate(){
+  if(!team||!week||!userId)return;
+
+  const newDate=document.getElementById("weekDateInput").value;
+  if(!newDate)return alert("Choose a week date first.");
+
+  if(newDate===week.starts_on){
+    return alert("This week already has that date.");
+  }
+
+  const oldDate=formatGameDate(week.starts_on);
+  const ok=confirm("Change "+oldDate+" to "+formatGameDate(newDate)+"?");
+  if(!ok)return;
+
+  try{
+    const rows=await api("/rest/v1/weeks?id=eq."+week.id,{
+      method:"PATCH",
+      body:{starts_on:newDate,label:newDate}
+    });
+
+    if(rows&&rows.length)week=rows[0];
+    await load();
+    alert("Week date updated.");
+  }catch(e){
+    alert("Could not update week: "+e.message);
+  }
+}
+
+async function deleteSelectedWeek(){
+  if(!team||!week||!userId)return;
+
+  const paidCount=payments.length;
+  const message="Delete "+formatGameDate(week.starts_on)+"?\n\nThis removes its roster and "+paidCount+" payment record"+(paidCount===1?"":"s")+". Players and other weeks will stay saved.";
+  const ok=confirm(message);
+  if(!ok)return;
+
+  try{
+    await api("/rest/v1/weeks?id=eq."+week.id,{method:"DELETE"});
+    week=null;
+    await load();
+    alert("Week deleted.");
+  }catch(e){
+    alert("Could not delete week: "+e.message);
   }
 }
 
