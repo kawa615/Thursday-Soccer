@@ -652,8 +652,8 @@ function updatePayerStatus(){
     ? "✅ "+player.name+" is already marked Paid."
     : player.name+" selected — choose Cash App or Venmo.";
 
-  cashBtn.disabled=!team?.cash_tag;
-  venmoBtn.disabled=!team?.venmo_url;
+  cashBtn.disabled=paid||!team?.cash_tag;
+  venmoBtn.disabled=paid||!team?.venmo_url;
 }
 
 function openCashApp(){const player=selectedPlayer();if(!player)return alert("Select your name first.");if(!team?.cash_tag)return alert("Cash App is not set up yet.");const tag=String(team.cash_tag).replace(/^\$/,"");const amount=Number(team.weekly_fee||10);location.href="https://cash.app/$"+encodeURIComponent(tag)+"/"+amount}
