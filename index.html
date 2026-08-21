@@ -24,6 +24,7 @@ button:disabled{opacity:.45}
 .money-box span{display:block;font-size:12px;color:#6d746f}
 .money-box b{font-size:20px}
 .pay-choice{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.rsvp-list{margin-top:10px;padding:12px;border-radius:12px;background:#f5f7f5;line-height:1.8}
 @media(max-width:520px){.pay-choice{grid-template-columns:1fr}}
 </style>
 </head>
@@ -48,6 +49,21 @@ button:disabled{opacity:.45}
   <select id="weekSelect" style="margin-top:10px" onchange="changeWeek(this.value)">
     <option value="">Loading weeks...</option>
   </select>
+</div>
+
+<div class="card" id="rsvpCard">
+  <h2>Weekly Poll</h2>
+  <div id="rsvpWeekText" class="muted">Choose your name and vote for this week.</div>
+  <select id="rsvpPlayerSelect" style="margin-top:10px" onchange="updateRsvpStatus()">
+    <option value="">Select your name</option>
+  </select>
+  <div class="pay-choice">
+    <button class="primary" onclick="saveRsvp('yes')">✅ Yes, I’m Playing</button>
+    <button class="danger" onclick="saveRsvp('no')">❌ No, I Can’t Play</button>
+  </div>
+  <div id="rsvpStatus" class="muted" style="margin-top:8px">Select your name to vote.</div>
+  <div id="rsvpYesList" class="rsvp-list ok"></div>
+  <div id="rsvpNoList" class="rsvp-list bad"></div>
 </div>
 
 <div class="card" id="payCard">
@@ -118,7 +134,7 @@ const SB_URL="https://aacbfebgypzrnvgcrrta.supabase.co";
 const SB_KEY="sb_publishable_Sk-be4OXcsyglT8HsEqngw_GLVQzZ-5";
 let accessToken=localStorage.getItem("ts_access_token")||"";
 let userId=localStorage.getItem("ts_user_id")||"";
-let team=null,week=null,weeks=[],players=[],payments=[],weekRoster=[];
+let team=null,week=null,weeks=[],players=[],allTeamPlayers=[],payments=[],weekRoster=[],rsvps=[];
 function setStatus(msg,error=false){const e=document.getElementById("summary");e.textContent=msg;e.style.color=error?"#b33":"#152018"}
 function money(n){return "$"+Number(n||0).toFixed(2).replace(".00","")}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -407,6 +423,7 @@ async function load(){
       "&select=*"+
       "&order=created_at.asc"
     );
+    allTeamPlayers=allPlayers;
 
     payments=week
       ? await api("/rest/v1/payments?week_id=eq."+week.id+"&select=*")
@@ -414,6 +431,10 @@ async function load(){
 
     weekRoster=week
       ? await api("/rest/v1/week_players?week_id=eq."+week.id+"&select=player_id")
+      : [];
+
+    rsvps=week
+      ? await api("/rest/v1/rsvps?week_id=eq."+week.id+"&select=*")
       : [];
 
     const rosterIds=new Set(weekRoster.map(r=>r.player_id));
@@ -494,6 +515,8 @@ function render(){
     if(typeof updatePayerStatus==="function")updatePayerStatus();
   }
 
+  renderRsvp();
+
   const isOwner=userId&&team.owner_id===userId;
 
   document.getElementById("players").innerHTML=players.length
@@ -542,6 +565,7 @@ async function changeWeek(weekId){
       "&select=*"+
       "&order=created_at.asc"
     );
+    allTeamPlayers=allPlayers;
 
     payments=await api(
       "/rest/v1/payments?week_id=eq."+week.id+"&select=*"
@@ -551,12 +575,80 @@ async function changeWeek(weekId){
       "/rest/v1/week_players?week_id=eq."+week.id+"&select=player_id"
     );
 
+    rsvps=await api(
+      "/rest/v1/rsvps?week_id=eq."+week.id+"&select=*"
+    );
+
     const rosterIds=new Set(weekRoster.map(r=>r.player_id));
     players=allPlayers.filter(p=>rosterIds.has(p.id));
 
     render();
   }catch(e){
     alert(e.message);
+  }
+}
+
+function renderRsvp(){
+  const select=document.getElementById("rsvpPlayerSelect");
+  const yesBox=document.getElementById("rsvpYesList");
+  const noBox=document.getElementById("rsvpNoList");
+  const weekText=document.getElementById("rsvpWeekText");
+  if(!select||!yesBox||!noBox)return;
+
+  const current=select.value;
+  select.innerHTML='<option value="">Select your name</option>'+
+    allTeamPlayers.map(p=>'<option value="'+p.id+'">'+escapeHtml(p.name)+'</option>').join("");
+  if(allTeamPlayers.some(p=>String(p.id)===String(current)))select.value=current;
+
+  const names=new Map(allTeamPlayers.map(p=>[String(p.id),p.name]));
+  const yes=rsvps.filter(r=>r.response==="yes");
+  const no=rsvps.filter(r=>r.response==="no");
+
+  if(weekText)weekText.textContent=week
+    ? "Poll for "+formatGameDate(week.starts_on)+" — choose your name and vote."
+    : "No week is selected.";
+
+  yesBox.innerHTML='<b>✅ Playing This Week ('+yes.length+')</b><br>'+
+    (yes.length?yes.map(r=>escapeHtml(names.get(String(r.player_id))||"Player")).join(", "):"No Yes votes yet.");
+  noBox.innerHTML='<b>❌ Not Playing ('+no.length+')</b><br>'+
+    (no.length?no.map(r=>escapeHtml(names.get(String(r.player_id))||"Player")).join(", "):"No No votes yet.");
+
+  updateRsvpStatus();
+}
+
+function updateRsvpStatus(){
+  const select=document.getElementById("rsvpPlayerSelect");
+  const status=document.getElementById("rsvpStatus");
+  if(!select||!status)return;
+  if(!select.value){
+    status.textContent="Select your name to vote.";
+    status.style.color="#6d746f";
+    return;
+  }
+  const player=allTeamPlayers.find(p=>String(p.id)===String(select.value));
+  const vote=rsvps.find(r=>String(r.player_id)===String(select.value));
+  status.textContent=vote
+    ? (vote.response==="yes"?"✅ ":"❌ ")+(player?.name||"Player")+" voted "+vote.response.toUpperCase()+". You can change the vote."
+    : (player?.name||"Player")+" has not voted yet.";
+  status.style.color=vote?(vote.response==="yes"?"#14823b":"#b33"):"#6d746f";
+}
+
+async function saveRsvp(response){
+  const select=document.getElementById("rsvpPlayerSelect");
+  const playerId=select?.value||"";
+  if(!team||!week)return alert("No week is selected.");
+  if(!playerId)return alert("Select your name first.");
+
+  try{
+    await api("/rest/v1/rsvps?on_conflict=week_id,player_id",{
+      method:"POST",
+      prefer:"resolution=merge-duplicates,return=representation",
+      body:{team_id:team.id,week_id:week.id,player_id:playerId,response,updated_at:new Date().toISOString()}
+    });
+    rsvps=await api("/rest/v1/rsvps?week_id=eq."+week.id+"&select=*");
+    renderRsvp();
+  }catch(e){
+    alert("Could not save vote: "+e.message);
   }
 }
 
