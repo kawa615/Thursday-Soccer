@@ -597,12 +597,14 @@ function renderRsvp(){
 
   const current=select.value;
   select.innerHTML='<option value="">Select your name</option>'+
-    allTeamPlayers.map(p=>'<option value="'+p.id+'">'+escapeHtml(p.name)+'</option>').join("");
-  if(allTeamPlayers.some(p=>String(p.id)===String(current)))select.value=current;
+    players.map(p=>'<option value="'+p.id+'">'+escapeHtml(p.name)+'</option>').join("");
+  if(players.some(p=>String(p.id)===String(current)))select.value=current;
 
-  const names=new Map(allTeamPlayers.map(p=>[String(p.id),p.name]));
-  const yes=rsvps.filter(r=>r.response==="yes");
-  const no=rsvps.filter(r=>r.response==="no");
+  const names=new Map(players.map(p=>[String(p.id),p.name]));
+  const rosterIds=new Set(players.map(p=>String(p.id)));
+  const visibleRsvps=rsvps.filter(r=>rosterIds.has(String(r.player_id)));
+  const yes=visibleRsvps.filter(r=>r.response==="yes");
+  const no=visibleRsvps.filter(r=>r.response==="no");
 
   if(weekText)weekText.textContent=week
     ? "Poll for "+formatGameDate(week.starts_on)+" — choose your name and vote."
@@ -625,7 +627,7 @@ function updateRsvpStatus(){
     status.style.color="#6d746f";
     return;
   }
-  const player=allTeamPlayers.find(p=>String(p.id)===String(select.value));
+  const player=players.find(p=>String(p.id)===String(select.value));
   const vote=rsvps.find(r=>String(r.player_id)===String(select.value));
   status.textContent=vote
     ? (vote.response==="yes"?"✅ ":"❌ ")+(player?.name||"Player")+" voted "+vote.response.toUpperCase()+". You can change the vote."
