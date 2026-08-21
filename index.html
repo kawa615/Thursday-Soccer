@@ -482,7 +482,14 @@ function render(){
   if(payerSelect){
     const currentSelection=payerSelect.value;
     payerSelect.innerHTML='<option value="">Select your name</option>'+
-      players.map(p=>'<option value="'+p.id+'">'+escapeHtml(p.name)+'</option>').join("");
+      players.map(p=>{
+        const paid=paidIds.has(p.id);
+        const color=paid?'#14823b':'#b33';
+        const icon=paid?'✅':'❌';
+        const label=paid?'Paid':'Unpaid';
+        return '<option value="'+p.id+'" style="color:'+color+';font-weight:700">'+
+          icon+' '+escapeHtml(p.name)+' — '+label+'</option>';
+      }).join("");
     if(players.some(p=>p.id===currentSelection))payerSelect.value=currentSelection;
     if(typeof updatePayerStatus==="function")updatePayerStatus();
   }
@@ -642,12 +649,16 @@ function updatePayerStatus(){
 
   if(!player){
     status.textContent="Select your name to continue.";
+    document.getElementById("payerSelect").style.color="#152018";
+    document.getElementById("payerSelect").style.fontWeight="400";
     cashBtn.disabled=true;
     venmoBtn.disabled=true;
     return;
   }
 
   const paid=payments.some(p=>String(p.player_id)===String(player.id));
+  document.getElementById("payerSelect").style.color=paid?"#14823b":"#b33";
+  document.getElementById("payerSelect").style.fontWeight="700";
   status.textContent=paid
     ? "✅ "+player.name+" is already marked Paid."
     : player.name+" selected — choose Cash App or Venmo.";
