@@ -156,6 +156,19 @@ function formatGameDate(iso){
     year:"numeric"
   });
 }
+function paymentPlayersForWeek(allPlayers){
+  const activePlayers=allPlayers.filter(p=>p.active!==false);
+  const includedIds=new Set();
+
+  if(rsvps.length){
+    rsvps.filter(r=>r.response==="yes").forEach(r=>includedIds.add(String(r.player_id)));
+    payments.forEach(p=>includedIds.add(String(p.player_id)));
+  }else{
+    weekRoster.forEach(r=>includedIds.add(String(r.player_id)));
+  }
+
+  return activePlayers.filter(p=>includedIds.has(String(p.id)));
+}
 function decodeJwt(token){try{const part=token.split(".")[1];const json=decodeURIComponent(atob(part.replace(/-/g,'+').replace(/_/g,'/')).split('').map(c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''));return JSON.parse(json)}catch(e){return null}}
 
 function clearExpiredSavedLogin(){
@@ -437,8 +450,7 @@ async function load(){
       ? await api("/rest/v1/rsvps?week_id=eq."+week.id+"&select=*")
       : [];
 
-    const rosterIds=new Set(weekRoster.map(r=>r.player_id));
-    players=allPlayers.filter(p=>rosterIds.has(p.id));
+    players=paymentPlayersForWeek(allPlayers);
 
     render();
   }catch(e){
@@ -579,8 +591,7 @@ async function changeWeek(weekId){
       "/rest/v1/rsvps?week_id=eq."+week.id+"&select=*"
     );
 
-    const rosterIds=new Set(weekRoster.map(r=>r.player_id));
-    players=allPlayers.filter(p=>rosterIds.has(p.id));
+    players=paymentPlayersForWeek(allPlayers);
 
     render();
   }catch(e){
@@ -596,13 +607,14 @@ function renderRsvp(){
   if(!select||!yesBox||!noBox)return;
 
   const current=select.value;
+  const pollPlayers=allTeamPlayers.filter(p=>p.active!==false);
   select.innerHTML='<option value="">Select your name</option>'+
-    players.map(p=>'<option value="'+p.id+'">'+escapeHtml(p.name)+'</option>').join("");
-  if(players.some(p=>String(p.id)===String(current)))select.value=current;
+    pollPlayers.map(p=>'<option value="'+p.id+'">'+escapeHtml(p.name)+'</option>').join("");
+  if(pollPlayers.some(p=>String(p.id)===String(current)))select.value=current;
 
-  const names=new Map(players.map(p=>[String(p.id),p.name]));
-  const rosterIds=new Set(players.map(p=>String(p.id)));
-  const visibleRsvps=rsvps.filter(r=>rosterIds.has(String(r.player_id)));
+  const names=new Map(pollPlayers.map(p=>[String(p.id),p.name]));
+  const pollIds=new Set(pollPlayers.map(p=>String(p.id)));
+  const visibleRsvps=rsvps.filter(r=>pollIds.has(String(r.player_id)));
   const yes=visibleRsvps.filter(r=>r.response==="yes");
   const no=visibleRsvps.filter(r=>r.response==="no");
 
@@ -627,7 +639,7 @@ function updateRsvpStatus(){
     status.style.color="#6d746f";
     return;
   }
-  const player=players.find(p=>String(p.id)===String(select.value));
+  const player=allTeamPlayers.find(p=>String(p.id)===String(select.value));
   const vote=rsvps.find(r=>String(r.player_id)===String(select.value));
   status.textContent=vote
     ? (vote.response==="yes"?"✅ ":"❌ ")+(player?.name||"Player")+" voted "+vote.response.toUpperCase()+". You can change the vote."
@@ -647,10 +659,43 @@ async function saveRsvp(response){
       prefer:"resolution=merge-duplicates,return=representation",
       body:{team_id:team.id,week_id:week.id,player_id:playerId,response,updated_at:new Date().toISOString()}
     });
-    rsvps=await api("/rest/v1/rsvps?week_id=eq."+week.id+"&select=*");
-    renderRsvp();
+
+    await changeWeek(week.id);
   }catch(e){
     alert("Could not save vote: "+e.message);
+  }
+}
+
+async function createOrOpenWeek(){
+  if(!team||!userId)return;
+
+  const selectedDate=document.getElementById("weekDateInput").value;
+  if(!selectedDate)return alert("Choose a week date first.");
+
+  const existing=weeks.find(w=>w.starts_on===selectedDate);
+  if(existing){
+    await changeWeek(existing.id);
+    return;
+  }
+
+  try{
+    const opening=await calculateOpeningBalance(selectedDate);
+    const created=await api("/rest/v1/weeks",{
+      method:"POST",
+      body:{
+        team_id:team.id,
+        starts_on:selectedDate,
+        label:selectedDate,
+        field_rent:120,
+        opening_balance:opening
+      }
+    });
+
+    weeks=[created[0],...weeks].sort((a,b)=>b.starts_on.localeCompare(a.starts_on));
+    await changeWeek(created[0].id);
+    alert("New week created. Players will appear in Payment after voting Yes in the Poll.");
+  }catch(e){
+    alert("Could not create week: "+e.message);
   }
 }
 
@@ -776,13 +821,6 @@ async function addPlayer(){
       body:{team_id:team.id,name,active:true}
     });
 
-    const player=created[0];
-
-    await api("/rest/v1/week_players",{
-      method:"POST",
-      body:{week_id:week.id,player_id:player.id}
-    });
-
     input.value="";
     await load();
   }catch(e){
@@ -832,6 +870,11 @@ async function removeFromWeek(playerId){
 
     await api(
       "/rest/v1/payments?week_id=eq."+week.id+"&player_id=eq."+playerId,
+      {method:"DELETE"}
+    );
+
+    await api(
+      "/rest/v1/rsvps?week_id=eq."+week.id+"&player_id=eq."+playerId,
       {method:"DELETE"}
     );
 
