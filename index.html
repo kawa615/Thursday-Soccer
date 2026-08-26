@@ -114,6 +114,8 @@ button:disabled{opacity:.45}
   <div class="muted" style="margin-bottom:8px">Choose the Thursday game date.</div>
   <input id="weekDateInput" type="date">
   <button class="primary" style="margin-top:10px;width:100%" onclick="createOrOpenWeek()">Create / Open Week</button>
+  <button class="secondary" style="margin-top:8px;width:100%" onclick="startSelectedWeekFresh()">Start Selected Week Fresh</button>
+  <div class="muted" style="margin-top:6px">Clears only this week’s poll and payments. Previous weeks stay saved.</div>
   <button class="secondary" style="margin-top:8px;width:100%" onclick="updateWeekDate()">Save New Week Date</button>
   <button class="danger" style="margin-top:8px;width:100%" onclick="deleteSelectedWeek()">Delete Selected Week</button>
 
@@ -696,6 +698,33 @@ async function createOrOpenWeek(){
     alert("New week created. Players will appear in Payment after voting Yes in the Poll.");
   }catch(e){
     alert("Could not create week: "+e.message);
+  }
+}
+
+async function startSelectedWeekFresh(){
+  if(!team||!week||!userId)return alert("Select a week first.");
+
+  const ok=confirm(
+    "Start "+formatGameDate(week.starts_on)+" fresh?\n\n"+
+    "This clears only this week's poll votes and payments. Previous weeks stay saved."
+  );
+  if(!ok)return;
+
+  try{
+    await api("/rest/v1/rsvps?week_id=eq."+week.id,{method:"DELETE"});
+    await api("/rest/v1/payments?week_id=eq."+week.id,{method:"DELETE"});
+    await api("/rest/v1/week_players?week_id=eq."+week.id,{method:"DELETE"});
+
+    const opening=await calculateOpeningBalance(week.starts_on);
+    await api("/rest/v1/weeks?id=eq."+week.id,{
+      method:"PATCH",
+      body:{opening_balance:opening}
+    });
+
+    await load();
+    alert("Week started fresh. No votes or payments yet.");
+  }catch(e){
+    alert("Could not start week fresh: "+e.message);
   }
 }
 
