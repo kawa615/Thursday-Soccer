@@ -38,9 +38,15 @@ button:disabled{opacity:.45}
   <div id="financeCard" class="money-grid hidden">
     <div class="money-box"><span>Balance from Last Week</span><b id="openingBalance">$0</b></div>
     <div class="money-box"><span>This Week Collected</span><b id="collectedAmount">$0</b></div>
-    <div class="money-box"><span>Field Rent</span><b id="fieldRent">$120</b></div>
+    <div class="money-box"><span>Field Rent</span><b id="fieldRent">$120</b><div id="fieldRentStatus" class="muted"></div></div>
+    <div class="money-box"><span>Other Expenses</span><b id="expenseAmount">$0</b></div>
     <div class="money-box"><span>New Balance</span><b id="newBalance">$0</b></div>
   </div>
+</div>
+
+<div class="card">
+  <h2>Expenses</h2>
+  <div id="expenseList" class="muted">No expenses for this week.</div>
 </div>
 
 <div class="card">
@@ -115,7 +121,7 @@ button:disabled{opacity:.45}
   <input id="weekDateInput" type="date">
   <button class="primary" style="margin-top:10px;width:100%" onclick="createOrOpenWeek()">Create / Open Week</button>
   <button class="secondary" style="margin-top:8px;width:100%" onclick="startSelectedWeekFresh()">Start Selected Week Fresh</button>
-  <div class="muted" style="margin-top:6px">Clears only this week’s poll and payments. Previous weeks stay saved.</div>
+  <div class="muted" style="margin-top:6px">Clears this week’s poll, payments, and expenses. Previous weeks stay saved.</div>
   <button class="secondary" style="margin-top:8px;width:100%" onclick="updateWeekDate()">Save New Week Date</button>
   <button class="danger" style="margin-top:8px;width:100%" onclick="deleteSelectedWeek()">Delete Selected Week</button>
 
@@ -123,6 +129,14 @@ button:disabled{opacity:.45}
   <input id="openingBalanceInput" type="number" step="0.01" placeholder="Balance from Last Week">
   <input id="fieldRentInput" type="number" step="0.01" placeholder="Field Rent" style="margin-top:8px">
   <button class="primary" style="margin-top:10px;width:100%" onclick="saveBalanceSettings()">Save Balance</button>
+  <button id="fieldRentPaidBtn" class="secondary" style="margin-top:8px;width:100%" onclick="toggleFieldRentPaid()">Mark Field Rent Paid</button>
+  <div id="fieldRentAdminStatus" class="muted" style="margin-top:6px">Rent is not deducted until you mark it paid.</div>
+
+  <h3 style="margin-top:22px">Add Expense</h3>
+  <input id="expenseDescription" placeholder="What did you buy? (ball, shirts, equipment)">
+  <input id="expenseInput" type="number" min="0.01" step="0.01" placeholder="Amount" style="margin-top:8px">
+  <input id="expenseDate" type="date" style="margin-top:8px">
+  <button class="primary" style="margin-top:10px;width:100%" onclick="addExpense()">Add Expense</button>
 
   <h3 style="margin-top:22px">Payment Settings</h3>
   <input id="cashTag" placeholder="Cash App $Cashtag">
@@ -136,7 +150,7 @@ const SB_URL="https://aacbfebgypzrnvgcrrta.supabase.co";
 const SB_KEY="sb_publishable_Sk-be4OXcsyglT8HsEqngw_GLVQzZ-5";
 let accessToken=localStorage.getItem("ts_access_token")||"";
 let userId=localStorage.getItem("ts_user_id")||"";
-let team=null,week=null,weeks=[],players=[],allTeamPlayers=[],payments=[],weekRoster=[],rsvps=[];
+let team=null,week=null,weeks=[],players=[],allTeamPlayers=[],payments=[],weekRoster=[],rsvps=[],expenses=[];
 function setStatus(msg,error=false){const e=document.getElementById("summary");e.textContent=msg;e.style.color=error?"#b33":"#152018"}
 function money(n){return "$"+Number(n||0).toFixed(2).replace(".00","")}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -369,7 +383,19 @@ async function signOut(){
   userId="";
   location.reload();
 }
-async function calculateOpeningBalance(start){const previousWeeks=await api("/rest/v1/weeks?team_id=eq."+team.id+"&starts_on=lt."+start+"&select=id,starts_on,field_rent,opening_balance&order=starts_on.desc&limit=1");if(!previousWeeks.length)return 0;const prev=previousWeeks[0];const prevPayments=await api("/rest/v1/payments?week_id=eq."+prev.id+"&select=amount");const prevCollected=prevPayments.reduce((sum,payment)=>sum+Number(payment.amount),0);return Number(prev.opening_balance||0)+prevCollected-Number(prev.field_rent||120)}
+async function calculateOpeningBalance(start){
+  const previousWeeks=await api("/rest/v1/weeks?team_id=eq."+team.id+"&starts_on=lt."+start+"&select=id,starts_on,field_rent,field_rent_paid,opening_balance&order=starts_on.desc&limit=1");
+  if(!previousWeeks.length)return 0;
+  const prev=previousWeeks[0];
+  const [prevPayments,prevExpenses]=await Promise.all([
+    api("/rest/v1/payments?week_id=eq."+prev.id+"&select=amount"),
+    api("/rest/v1/expenses?week_id=eq."+prev.id+"&select=amount")
+  ]);
+  const prevCollected=prevPayments.reduce((sum,item)=>sum+Number(item.amount),0);
+  const prevOtherExpenses=prevExpenses.reduce((sum,item)=>sum+Number(item.amount),0);
+  const paidRent=prev.field_rent_paid?Number(prev.field_rent||0):0;
+  return Number(prev.opening_balance||0)+prevCollected-paidRent-prevOtherExpenses;
+}
 async function ensureTeamAndWeek(){
   if(userId){
     let owned=await api(
@@ -407,6 +433,7 @@ async function ensureTeamAndWeek(){
         starts_on:start,
         label:start,
         field_rent:120,
+        field_rent_paid:false,
         opening_balance:0
       }
     });
@@ -452,6 +479,10 @@ async function load(){
       ? await api("/rest/v1/rsvps?week_id=eq."+week.id+"&select=*")
       : [];
 
+    expenses=week
+      ? await api("/rest/v1/expenses?week_id=eq."+week.id+"&select=*&order=spent_on.desc,created_at.desc")
+      : [];
+
     players=paymentPlayersForWeek(allPlayers);
 
     render();
@@ -475,6 +506,7 @@ function render(){
   if(rentInput&&week)rentInput.value=Number(week.field_rent||120);
 
   const collected=payments.reduce((sum,x)=>sum+Number(x.amount),0);
+  const otherExpenses=expenses.reduce((sum,x)=>sum+Number(x.amount),0);
 
   setStatus(paidIds.size+"/"+players.length+" Paid • "+money(collected)+" Collected");
 
@@ -490,15 +522,38 @@ function render(){
     finance.classList.toggle("hidden",!week);
     if(week){
       const opening=Number(week.opening_balance||0);
-      const rent=Number(week.field_rent||120);
-      const balance=opening+collected-rent;
+      const rent=Number(week.field_rent||0);
+      const paidRent=week.field_rent_paid?rent:0;
+      const balance=opening+collected-paidRent-otherExpenses;
       document.getElementById("openingBalance").textContent=money(opening);
       document.getElementById("collectedAmount").textContent=money(collected);
       document.getElementById("fieldRent").textContent=money(rent);
+      document.getElementById("fieldRentStatus").textContent=week.field_rent_paid?"✅ Paid & deducted":"⏳ Not paid — not deducted";
+      document.getElementById("fieldRentStatus").className=week.field_rent_paid?"muted ok":"muted";
+      document.getElementById("expenseAmount").textContent=money(otherExpenses);
       document.getElementById("newBalance").textContent=money(balance);
       document.getElementById("newBalance").className=balance>=0?"ok":"bad";
     }
   }
+
+  const expenseList=document.getElementById("expenseList");
+  const isOwner=userId&&team.owner_id===userId;
+  if(expenseList){
+    expenseList.innerHTML=expenses.length
+      ? expenses.map(item=>'<div class="player"><div><b>'+escapeHtml(item.description)+'</b><div class="muted">'+escapeHtml(item.spent_on||"")+'</div></div><div style="display:flex;align-items:center;gap:8px"><b class="bad">-'+money(item.amount)+'</b>'+(isOwner?'<button class="danger" onclick="deleteExpense(\''+item.id+'\')">Delete</button>':'')+'</div></div>').join("")
+      : 'No expenses for this week.';
+  }
+
+  const rentButton=document.getElementById("fieldRentPaidBtn");
+  const rentAdminStatus=document.getElementById("fieldRentAdminStatus");
+  if(rentButton&&week)rentButton.textContent=week.field_rent_paid?"Mark Field Rent Unpaid":"Mark Field Rent Paid";
+  if(rentButton)rentButton.className=week?.field_rent_paid?"danger":"secondary";
+  if(rentAdminStatus&&week)rentAdminStatus.textContent=week.field_rent_paid
+    ? money(week.field_rent||0)+" has been deducted from this week's balance."
+    : "Rent is not deducted until you mark it paid.";
+
+  const expenseDate=document.getElementById("expenseDate");
+  if(expenseDate&&week&&!expenseDate.value)expenseDate.value=week.starts_on;
 
   const weekSelect=document.getElementById("weekSelect");
   if(weekSelect&&Array.isArray(weeks)){
@@ -530,8 +585,6 @@ function render(){
   }
 
   renderRsvp();
-
-  const isOwner=userId&&team.owner_id===userId;
 
   document.getElementById("players").innerHTML=players.length
     ? players.map(p=>{
@@ -591,6 +644,10 @@ async function changeWeek(weekId){
 
     rsvps=await api(
       "/rest/v1/rsvps?week_id=eq."+week.id+"&select=*"
+    );
+
+    expenses=await api(
+      "/rest/v1/expenses?week_id=eq."+week.id+"&select=*&order=spent_on.desc,created_at.desc"
     );
 
     players=paymentPlayersForWeek(allPlayers);
@@ -689,6 +746,7 @@ async function createOrOpenWeek(){
         starts_on:selectedDate,
         label:selectedDate,
         field_rent:120,
+        field_rent_paid:false,
         opening_balance:opening
       }
     });
@@ -706,7 +764,7 @@ async function startSelectedWeekFresh(){
 
   const ok=confirm(
     "Start "+formatGameDate(week.starts_on)+" fresh?\n\n"+
-    "This clears only this week's poll votes and payments. Previous weeks stay saved."
+    "This clears this week's poll votes, payments, and expenses. Previous weeks stay saved."
   );
   if(!ok)return;
 
@@ -714,11 +772,12 @@ async function startSelectedWeekFresh(){
     await api("/rest/v1/rsvps?week_id=eq."+week.id,{method:"DELETE"});
     await api("/rest/v1/payments?week_id=eq."+week.id,{method:"DELETE"});
     await api("/rest/v1/week_players?week_id=eq."+week.id,{method:"DELETE"});
+    await api("/rest/v1/expenses?week_id=eq."+week.id,{method:"DELETE"});
 
     const opening=await calculateOpeningBalance(week.starts_on);
     await api("/rest/v1/weeks?id=eq."+week.id,{
       method:"PATCH",
-      body:{opening_balance:opening}
+      body:{opening_balance:opening,field_rent_paid:false,field_rent_paid_at:null}
     });
 
     await load();
@@ -801,6 +860,52 @@ async function saveBalanceSettings(){
   }catch(e){
     alert(e.message);
   }
+}
+
+async function toggleFieldRentPaid(){
+  if(!team||!week||!userId)return;
+  const willBePaid=!week.field_rent_paid;
+  const message=willBePaid
+    ? "Mark "+money(week.field_rent||0)+" field rent paid and deduct it from this week's balance?"
+    : "Mark field rent unpaid and put it back into this week's balance?";
+  if(!confirm(message))return;
+
+  try{
+    await api("/rest/v1/weeks?id=eq."+week.id,{
+      method:"PATCH",
+      body:{field_rent_paid:willBePaid,field_rent_paid_at:willBePaid?new Date().toISOString():null}
+    });
+    await load();
+  }catch(e){alert("Could not update field rent: "+e.message)}
+}
+
+async function addExpense(){
+  if(!team||!week||!userId)return;
+  const description=document.getElementById("expenseDescription").value.trim();
+  const amount=Number(document.getElementById("expenseInput").value);
+  const spentOn=document.getElementById("expenseDate").value||week.starts_on;
+  if(!description)return alert("Enter what the expense was for.");
+  if(!Number.isFinite(amount)||amount<=0)return alert("Enter a valid expense amount.");
+
+  try{
+    await api("/rest/v1/expenses",{
+      method:"POST",
+      body:{team_id:team.id,week_id:week.id,description,amount,spent_on:spentOn,created_by:userId}
+    });
+    document.getElementById("expenseDescription").value="";
+    document.getElementById("expenseInput").value="";
+    await load();
+  }catch(e){alert("Could not add expense: "+e.message)}
+}
+
+async function deleteExpense(expenseId){
+  if(!week||!userId)return;
+  const item=expenses.find(x=>String(x.id)===String(expenseId));
+  if(!item||!confirm("Delete "+item.description+" expense of "+money(item.amount)+"?"))return;
+  try{
+    await api("/rest/v1/expenses?id=eq."+expenseId,{method:"DELETE"});
+    await load();
+  }catch(e){alert("Could not delete expense: "+e.message)}
 }
 async function savePaymentSettings(){if(!team||!userId)return;const cashTag=document.getElementById("cashTag").value.trim().replace(/^\$/,"");const venmoUrl=document.getElementById("venmoUrl").value.trim();try{await api("/rest/v1/teams?id=eq."+team.id,{method:"PATCH",body:{cash_tag:cashTag||null,venmo_url:venmoUrl||null}});team.cash_tag=cashTag||null;team.venmo_url=venmoUrl||null;updatePayerStatus();alert("Payment settings saved.")}catch(e){alert(e.message)}}
 function selectedPlayer(){
