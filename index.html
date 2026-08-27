@@ -64,8 +64,8 @@ button:disabled{opacity:.45}
     <option value="">Select your name</option>
   </select>
   <div class="pay-choice">
-    <button class="primary" onclick="saveRsvp('yes')">✅ Yes, I’m Playing</button>
-    <button class="danger" onclick="saveRsvp('no')">❌ No, I Can’t Play</button>
+    <button id="rsvpYesBtn" class="primary" onclick="saveRsvp('yes')">✅ Yes, I’m Playing</button>
+    <button id="rsvpNoBtn" class="danger" onclick="saveRsvp('no')">❌ No, I Can’t Play</button>
   </div>
   <div id="rsvpStatus" class="muted" style="margin-top:8px">Select your name to vote.</div>
   <div id="rsvpYesList" class="rsvp-list ok"></div>
@@ -122,6 +122,8 @@ button:disabled{opacity:.45}
   <button class="primary" style="margin-top:10px;width:100%" onclick="createOrOpenWeek()">Create / Open Week</button>
   <button class="secondary" style="margin-top:8px;width:100%" onclick="startSelectedWeekFresh()">Start Selected Week Fresh</button>
   <div class="muted" style="margin-top:6px">Clears this week’s poll, payments, and expenses. Previous weeks stay saved.</div>
+  <button id="pollLockBtn" class="danger" style="margin-top:8px;width:100%" onclick="togglePollLock()">Close Poll After Game</button>
+  <div id="pollLockAdminStatus" class="muted" style="margin-top:6px">Players can still change Yes/No.</div>
   <button class="secondary" style="margin-top:8px;width:100%" onclick="updateWeekDate()">Save New Week Date</button>
   <button class="danger" style="margin-top:8px;width:100%" onclick="deleteSelectedWeek()">Delete Selected Week</button>
 
@@ -434,6 +436,7 @@ async function ensureTeamAndWeek(){
         label:start,
         field_rent:120,
         field_rent_paid:false,
+        poll_locked:false,
         opening_balance:0
       }
     });
@@ -568,6 +571,16 @@ function render(){
   const weekDateInput=document.getElementById("weekDateInput");
   if(weekDateInput&&week)weekDateInput.value=week.starts_on;
 
+  const pollLockButton=document.getElementById("pollLockBtn");
+  const pollLockStatus=document.getElementById("pollLockAdminStatus");
+  if(pollLockButton&&week){
+    pollLockButton.textContent=week.poll_locked?"Reopen Poll":"Close Poll After Game";
+    pollLockButton.className=week.poll_locked?"secondary":"danger";
+  }
+  if(pollLockStatus&&week)pollLockStatus.textContent=week.poll_locked
+    ? "Poll is locked. Players can still pay."
+    : "Players can still change Yes/No.";
+
   const payerSelect=document.getElementById("payerSelect");
   if(payerSelect){
     const currentSelection=payerSelect.value;
@@ -663,6 +676,8 @@ function renderRsvp(){
   const yesBox=document.getElementById("rsvpYesList");
   const noBox=document.getElementById("rsvpNoList");
   const weekText=document.getElementById("rsvpWeekText");
+  const yesButton=document.getElementById("rsvpYesBtn");
+  const noButton=document.getElementById("rsvpNoBtn");
   if(!select||!yesBox||!noBox)return;
 
   const current=select.value;
@@ -677,8 +692,13 @@ function renderRsvp(){
   const yes=visibleRsvps.filter(r=>r.response==="yes");
   const no=visibleRsvps.filter(r=>r.response==="no");
 
+  if(yesButton)yesButton.disabled=!week||!!week.poll_locked;
+  if(noButton)noButton.disabled=!week||!!week.poll_locked;
+
   if(weekText)weekText.textContent=week
-    ? "Poll for "+formatGameDate(week.starts_on)+" — choose your name and vote."
+    ? (week.poll_locked
+        ? "🔒 Poll closed for "+formatGameDate(week.starts_on)+". Final results are below. Payment is still available."
+        : "Poll for "+formatGameDate(week.starts_on)+" — choose your name and vote.")
     : "No week is selected.";
 
   yesBox.innerHTML='<b>✅ Playing This Week ('+yes.length+')</b><br>'+
@@ -694,15 +714,21 @@ function updateRsvpStatus(){
   const status=document.getElementById("rsvpStatus");
   if(!select||!status)return;
   if(!select.value){
-    status.textContent="Select your name to vote.";
+    status.textContent=week?.poll_locked
+      ? "🔒 Poll is closed. Select your name to view the final vote."
+      : "Select your name to vote.";
     status.style.color="#6d746f";
     return;
   }
   const player=allTeamPlayers.find(p=>String(p.id)===String(select.value));
   const vote=rsvps.find(r=>String(r.player_id)===String(select.value));
-  status.textContent=vote
-    ? (vote.response==="yes"?"✅ ":"❌ ")+(player?.name||"Player")+" voted "+vote.response.toUpperCase()+". You can change the vote."
-    : (player?.name||"Player")+" has not voted yet.";
+  status.textContent=week?.poll_locked
+    ? (vote
+        ? "🔒 Final vote: "+(vote.response==="yes"?"✅ YES":"❌ NO")
+        : "🔒 Poll closed. "+(player?.name||"Player")+" did not vote.")
+    : (vote
+        ? (vote.response==="yes"?"✅ ":"❌ ")+(player?.name||"Player")+" voted "+vote.response.toUpperCase()+". You can change the vote."
+        : (player?.name||"Player")+" has not voted yet.");
   status.style.color=vote?(vote.response==="yes"?"#14823b":"#b33"):"#6d746f";
 }
 
@@ -710,6 +736,7 @@ async function saveRsvp(response){
   const select=document.getElementById("rsvpPlayerSelect");
   const playerId=select?.value||"";
   if(!team||!week)return alert("No week is selected.");
+  if(week.poll_locked)return alert("The poll is closed. Payment is still available below.");
   if(!playerId)return alert("Select your name first.");
 
   try{
@@ -747,6 +774,7 @@ async function createOrOpenWeek(){
         label:selectedDate,
         field_rent:120,
         field_rent_paid:false,
+        poll_locked:false,
         opening_balance:opening
       }
     });
@@ -777,13 +805,33 @@ async function startSelectedWeekFresh(){
     const opening=await calculateOpeningBalance(week.starts_on);
     await api("/rest/v1/weeks?id=eq."+week.id,{
       method:"PATCH",
-      body:{opening_balance:opening,field_rent_paid:false,field_rent_paid_at:null}
+      body:{opening_balance:opening,field_rent_paid:false,field_rent_paid_at:null,poll_locked:false,poll_locked_at:null}
     });
 
     await load();
     alert("Week started fresh. No votes or payments yet.");
   }catch(e){
     alert("Could not start week fresh: "+e.message);
+  }
+}
+
+async function togglePollLock(){
+  if(!team||!week||!userId)return;
+  const willLock=!week.poll_locked;
+  const message=willLock
+    ? "Close the poll for "+formatGameDate(week.starts_on)+"?\n\nPlayers will not be able to change Yes/No, but they can still pay."
+    : "Reopen the poll so players can change Yes/No again?";
+  if(!confirm(message))return;
+
+  try{
+    await api("/rest/v1/weeks?id=eq."+week.id,{
+      method:"PATCH",
+      body:{poll_locked:willLock,poll_locked_at:willLock?new Date().toISOString():null}
+    });
+    await load();
+    alert(willLock?"Poll closed. Payment is still available.":"Poll reopened.");
+  }catch(e){
+    alert("Could not update poll: "+e.message);
   }
 }
 
