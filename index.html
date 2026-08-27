@@ -824,11 +824,19 @@ async function togglePollLock(){
   if(!confirm(message))return;
 
   try{
-    await api("/rest/v1/weeks?id=eq."+week.id,{
+    const selectedWeekId=week.id;
+    const rows=await api("/rest/v1/weeks?id=eq."+selectedWeekId,{
       method:"PATCH",
       body:{poll_locked:willLock,poll_locked_at:willLock?new Date().toISOString():null}
     });
-    await load();
+    if(rows&&rows.length){
+      week=rows[0];
+      weeks=weeks.map(item=>String(item.id)===String(selectedWeekId)?rows[0]:item);
+    }else{
+      week.poll_locked=willLock;
+      week.poll_locked_at=willLock?new Date().toISOString():null;
+    }
+    render();
     alert(willLock?"Poll closed. Payment is still available.":"Poll reopened.");
   }catch(e){
     alert("Could not update poll: "+e.message);
