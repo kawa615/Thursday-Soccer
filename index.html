@@ -60,7 +60,7 @@ button:disabled{opacity:.45}
   </select>
 </div>
 
-<div class="card" id="rsvpCard">
+<div class="card sound-zone" id="rsvpCard">
   <h2>Weekly Poll</h2>
   <div id="rsvpWeekText" class="muted">Choose your name and vote for this week.</div>
   <select id="rsvpPlayerSelect" style="margin-top:10px" onchange="updateRsvpStatus()">
@@ -223,14 +223,25 @@ function setupSoundEffects(){
     if(event.target.matches?.("select"))playSound("select");
   });
 
-  document.addEventListener("scroll",event=>{
-    const target=event.target;
-    if(!target?.classList?.contains("sound-scroll"))return;
+  const playScrollTick=()=>{
     const now=performance.now();
     if(now-lastScrollSound<120)return;
     lastScrollSound=now;
     playSound("scroll");
+  };
+
+  document.addEventListener("scroll",event=>{
+    const target=event.target;
+    if(target?.classList?.contains("sound-scroll"))playScrollTick();
   },true);
+
+  document.addEventListener("touchmove",event=>{
+    if(event.target.closest?.(".sound-zone"))playScrollTick();
+  },{passive:true});
+
+  document.addEventListener("wheel",event=>{
+    if(event.target.closest?.(".sound-zone"))playScrollTick();
+  },{passive:true});
 }
 function setStatus(msg,error=false){const e=document.getElementById("summary");e.textContent=msg;e.style.color=error?"#b33":"#152018"}
 function money(n){return "$"+Number(n||0).toFixed(2).replace(".00","")}
