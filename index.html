@@ -25,12 +25,15 @@ button:disabled{opacity:.45}
 .money-box b{font-size:20px}
 .pay-choice{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
 .rsvp-list{margin-top:10px;padding:12px;border-radius:12px;background:#f5f7f5;line-height:1.8}
+.sound-scroll{max-height:420px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.sound-toggle{position:fixed;right:14px;bottom:max(14px,env(safe-area-inset-bottom));z-index:50;box-shadow:0 3px 14px #0003}
 @media(max-width:520px){.pay-choice{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <div class="app">
 <h1>⚽ Thursday Soccer</h1>
+<button id="soundToggle" class="secondary sound-toggle" type="button" onclick="toggleSound(event)">🔊 Sound On</button>
 
 <div class="card">
   <div id="summary" class="status">Loading...</div>
@@ -46,7 +49,7 @@ button:disabled{opacity:.45}
 
 <div class="card">
   <h2>Expenses</h2>
-  <div id="expenseList" class="muted">No expenses for this week.</div>
+  <div id="expenseList" class="muted sound-scroll">No expenses for this week.</div>
 </div>
 
 <div class="card">
@@ -68,8 +71,8 @@ button:disabled{opacity:.45}
     <button id="rsvpNoBtn" class="danger" onclick="saveRsvp('no')">❌ No, I Can’t Play</button>
   </div>
   <div id="rsvpStatus" class="muted" style="margin-top:8px">Select your name to vote.</div>
-  <div id="rsvpYesList" class="rsvp-list ok"></div>
-  <div id="rsvpNoList" class="rsvp-list bad"></div>
+  <div id="rsvpYesList" class="rsvp-list ok sound-scroll"></div>
+  <div id="rsvpNoList" class="rsvp-list bad sound-scroll"></div>
 </div>
 
 <div class="card" id="payCard">
@@ -88,7 +91,7 @@ button:disabled{opacity:.45}
 
 <div class="card">
   <h2>Players</h2>
-  <div id="players"></div>
+  <div id="players" class="sound-scroll"></div>
 </div>
 
 <div class="card hidden" id="resetCard">
@@ -153,6 +156,82 @@ const SB_KEY="sb_publishable_Sk-be4OXcsyglT8HsEqngw_GLVQzZ-5";
 let accessToken=localStorage.getItem("ts_access_token")||"";
 let userId=localStorage.getItem("ts_user_id")||"";
 let team=null,week=null,weeks=[],players=[],allTeamPlayers=[],payments=[],weekRoster=[],rsvps=[],expenses=[];
+let soundEnabled=localStorage.getItem("ts_sound")!=="off";
+let audioContext=null;
+let lastScrollSound=0;
+
+function getAudioContext(){
+  if(!audioContext){
+    const AudioClass=window.AudioContext||window.webkitAudioContext;
+    if(AudioClass)audioContext=new AudioClass();
+  }
+  return audioContext;
+}
+
+function playSound(kind="click"){
+  if(!soundEnabled)return;
+  const ctx=getAudioContext();
+  if(!ctx)return;
+
+  const makeSound=()=>{
+    const oscillator=ctx.createOscillator();
+    const gain=ctx.createGain();
+    const now=ctx.currentTime;
+    const settings=kind==="scroll"
+      ? {frequency:280,duration:.018,volume:.012,type:"sine"}
+      : kind==="select"
+        ? {frequency:720,duration:.045,volume:.025,type:"sine"}
+        : {frequency:520,duration:.035,volume:.025,type:"triangle"};
+
+    oscillator.type=settings.type;
+    oscillator.frequency.setValueAtTime(settings.frequency,now);
+    gain.gain.setValueAtTime(settings.volume,now);
+    gain.gain.exponentialRampToValueAtTime(.0001,now+settings.duration);
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start(now);
+    oscillator.stop(now+settings.duration);
+  };
+
+  if(ctx.state==="suspended")ctx.resume().then(makeSound).catch(()=>{});
+  else makeSound();
+}
+
+function updateSoundButton(){
+  const button=document.getElementById("soundToggle");
+  if(button)button.textContent=soundEnabled?"🔊 Sound On":"🔇 Sound Off";
+}
+
+function toggleSound(event){
+  if(event)event.stopPropagation();
+  soundEnabled=!soundEnabled;
+  localStorage.setItem("ts_sound",soundEnabled?"on":"off");
+  updateSoundButton();
+  if(soundEnabled)playSound("select");
+}
+
+function setupSoundEffects(){
+  updateSoundButton();
+
+  document.addEventListener("pointerdown",event=>{
+    const ctx=getAudioContext();
+    if(soundEnabled&&ctx?.state==="suspended")ctx.resume().catch(()=>{});
+    if(event.target.closest?.("button:not(:disabled)"))playSound("click");
+  },{passive:true});
+
+  document.addEventListener("change",event=>{
+    if(event.target.matches?.("select"))playSound("select");
+  });
+
+  document.addEventListener("scroll",event=>{
+    const target=event.target;
+    if(!target?.classList?.contains("sound-scroll"))return;
+    const now=performance.now();
+    if(now-lastScrollSound<120)return;
+    lastScrollSound=now;
+    playSound("scroll");
+  },true);
+}
 function setStatus(msg,error=false){const e=document.getElementById("summary");e.textContent=msg;e.style.color=error?"#b33":"#152018"}
 function money(n){return "$"+Number(n||0).toFixed(2).replace(".00","")}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -1076,6 +1155,7 @@ async function removeFromWeek(playerId){
 
 async function markPaid(player_id){if(!team||!week||!userId)return;try{await api("/rest/v1/payments",{method:"POST",body:{team_id:team.id,week_id:week.id,player_id,amount:team.weekly_fee,method:"other",created_by:userId}});await load()}catch(e){alert(e.message)}}
 async function markUnpaid(player_id){if(!week||!userId)return;try{await api("/rest/v1/payments?week_id=eq."+week.id+"&player_id=eq."+player_id,{method:"DELETE"});await load()}catch(e){alert(e.message)}}
+setupSoundEffects();
 load();
 </script>
 </body>
