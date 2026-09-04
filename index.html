@@ -281,7 +281,7 @@ function nextGameDateISO(gameDay=4){
 }
 function requestedTeamId(){
   const params=new URLSearchParams(location.search);
-  return params.get("team")||localStorage.getItem("ws_last_team_id")||"";
+  return params.get("team")||localStorage.getItem("ws_last_team_id")||"5e83360b-1b47-4600-a7dd-b1031e59940e";
 }
 function rememberTeam(teamId){
   if(!teamId)return;
