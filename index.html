@@ -38,6 +38,9 @@ button:disabled{opacity:.45}
 .app-brand{text-align:center;color:#14823b;font-weight:800;letter-spacing:.08em;text-transform:uppercase;font-size:13px;margin-top:8px}
 .form-label{display:block;font-weight:700;margin:12px 0 6px}
 .divider{height:1px;background:#e5ebe6;margin:18px 0}
+.soccer-hero{height:250px;border-radius:22px;overflow:hidden;margin:8px 0 16px;box-shadow:0 8px 24px #082a1860;background:#0a2b23}
+.soccer-hero img{width:100%;height:100%;display:block;object-fit:cover;object-position:center 58%}
+@media(max-width:520px){.soccer-hero{height:190px;border-radius:18px}.soccer-hero img{object-position:55% 58%}}
 @media(max-width:520px){.pay-choice{grid-template-columns:1fr}}
 </style>
 </head>
@@ -45,6 +48,9 @@ button:disabled{opacity:.45}
 <div class="app">
 <div class="app-brand">Weekly Soccer</div>
 <h1 id="appTitle">⚽ Weekly Soccer</h1>
+<div class="soccer-hero">
+  <img src="weekly-soccer-kick.jpg" alt="Soccer player kicking a ball toward the goal" width="1400" height="678" fetchpriority="high">
+</div>
 <button id="soundToggle" class="secondary sound-toggle" type="button" onclick="toggleSound(event)">🔊 Sound On</button>
 <button id="installButton" class="primary install-toggle" type="button" onclick="installWeeklySoccer()">📲 Install App</button>
 
