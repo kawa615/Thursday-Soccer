@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Weekly Soccer</title>
+  <rect width="512" height="512" rx="112" fill="#14823b"/>
+  <circle cx="256" cy="222" r="134" fill="#ffffff" opacity=".12"/>
+  <path d="M120 126h44l34 176 42-128h32l42 128 34-176h44l-54 260h-42l-40-122-40 122h-42z" fill="#ffffff"/>
+  <rect x="116" y="404" width="280" height="18" rx="9" fill="#ffffff" opacity=".8"/>
+</svg>
