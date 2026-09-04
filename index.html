@@ -639,28 +639,23 @@ async function load(){
       return;
     }
 
-    const allPlayers=await api(
-      "/rest/v1/players?team_id=eq."+team.id+
-      "&select=*"+
-      "&order=created_at.asc"
-    );
+    const [allPlayers,loadedPayments,loadedRoster,loadedRsvps,loadedExpenses]=await Promise.all([
+      api(
+        "/rest/v1/players?team_id=eq."+team.id+
+        "&select=*"+
+        "&order=created_at.asc"
+      ),
+      week?api("/rest/v1/payments?week_id=eq."+week.id+"&select=*"):Promise.resolve([]),
+      week?api("/rest/v1/week_players?week_id=eq."+week.id+"&select=player_id"):Promise.resolve([]),
+      week?api("/rest/v1/rsvps?week_id=eq."+week.id+"&select=*"):Promise.resolve([]),
+      week?api("/rest/v1/expenses?week_id=eq."+week.id+"&select=*&order=spent_on.desc,created_at.desc"):Promise.resolve([])
+    ]);
+
     allTeamPlayers=allPlayers;
-
-    payments=week
-      ? await api("/rest/v1/payments?week_id=eq."+week.id+"&select=*")
-      : [];
-
-    weekRoster=week
-      ? await api("/rest/v1/week_players?week_id=eq."+week.id+"&select=player_id")
-      : [];
-
-    rsvps=week
-      ? await api("/rest/v1/rsvps?week_id=eq."+week.id+"&select=*")
-      : [];
-
-    expenses=week
-      ? await api("/rest/v1/expenses?week_id=eq."+week.id+"&select=*&order=spent_on.desc,created_at.desc")
-      : [];
+    payments=loadedPayments;
+    weekRoster=loadedRoster;
+    rsvps=loadedRsvps;
+    expenses=loadedExpenses;
 
     players=paymentPlayersForWeek(allPlayers);
 
@@ -826,28 +821,23 @@ async function changeWeek(weekId){
   week=selected;
 
   try{
-    const allPlayers=await api(
-      "/rest/v1/players?team_id=eq."+team.id+
-      "&select=*"+
-      "&order=created_at.asc"
-    );
+    const [allPlayers,loadedPayments,loadedRoster,loadedRsvps,loadedExpenses]=await Promise.all([
+      api(
+        "/rest/v1/players?team_id=eq."+team.id+
+        "&select=*"+
+        "&order=created_at.asc"
+      ),
+      api("/rest/v1/payments?week_id=eq."+week.id+"&select=*"),
+      api("/rest/v1/week_players?week_id=eq."+week.id+"&select=player_id"),
+      api("/rest/v1/rsvps?week_id=eq."+week.id+"&select=*"),
+      api("/rest/v1/expenses?week_id=eq."+week.id+"&select=*&order=spent_on.desc,created_at.desc")
+    ]);
+
     allTeamPlayers=allPlayers;
-
-    payments=await api(
-      "/rest/v1/payments?week_id=eq."+week.id+"&select=*"
-    );
-
-    weekRoster=await api(
-      "/rest/v1/week_players?week_id=eq."+week.id+"&select=player_id"
-    );
-
-    rsvps=await api(
-      "/rest/v1/rsvps?week_id=eq."+week.id+"&select=*"
-    );
-
-    expenses=await api(
-      "/rest/v1/expenses?week_id=eq."+week.id+"&select=*&order=spent_on.desc,created_at.desc"
-    );
+    payments=loadedPayments;
+    weekRoster=loadedRoster;
+    rsvps=loadedRsvps;
+    expenses=loadedExpenses;
 
     players=paymentPlayersForWeek(allPlayers);
 
