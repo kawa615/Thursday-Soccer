@@ -1,5 +1,5 @@
-const CACHE_NAME="weekly-soccer-v1";
-const APP_SHELL=["./","./index.html","./manifest.webmanifest","./icon.svg"];
+const CACHE_NAME="weekly-soccer-v2";
+const APP_SHELL=["./","./index.html","./manifest.webmanifest","./icon.svg","./weekly-soccer-kick.jpg"];
 
 self.addEventListener("install",event=>{
   event.waitUntil(
