@@ -1,0 +1,20 @@
+{
+  "id": "./",
+  "name": "Weekly Soccer",
+  "short_name": "Weekly Soccer",
+  "description": "Manage weekly soccer groups, players, polls, payments, and expenses.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f7f5",
+  "theme_color": "#14823b",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
