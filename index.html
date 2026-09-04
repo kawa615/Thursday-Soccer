@@ -478,7 +478,7 @@ async function createAdminAccount(){
       await load();
       alert("Your admin account and private group are ready.");
     }else{
-      status.textContent="Account created. Check your email to confirm it, then sign in.";
+      status.textContent="If this email is new, check your inbox and spam to confirm it. If you already have an account, use Sign In or Forgot Password.";
       status.style.color="#14823b";
     }
   }catch(e){
