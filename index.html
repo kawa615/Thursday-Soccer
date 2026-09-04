@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#14823b">
-<title>Thursday Soccer</title>
+<title>Weekly Soccer</title>
 <style>
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f7f5;margin:0;color:#152018}
 .app{max-width:720px;margin:auto;padding:16px}
@@ -27,12 +27,16 @@ button:disabled{opacity:.45}
 .rsvp-list{margin-top:10px;padding:12px;border-radius:12px;background:#f5f7f5;line-height:1.8}
 .sound-scroll{max-height:420px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .sound-toggle{position:fixed;right:14px;bottom:max(14px,env(safe-area-inset-bottom));z-index:50;box-shadow:0 3px 14px #0003}
+.app-brand{text-align:center;color:#14823b;font-weight:800;letter-spacing:.08em;text-transform:uppercase;font-size:13px;margin-top:8px}
+.form-label{display:block;font-weight:700;margin:12px 0 6px}
+.divider{height:1px;background:#e5ebe6;margin:18px 0}
 @media(max-width:520px){.pay-choice{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <div class="app">
-<h1>⚽ Thursday Soccer</h1>
+<div class="app-brand">Weekly Soccer</div>
+<h1 id="appTitle">⚽ Weekly Soccer</h1>
 <button id="soundToggle" class="secondary sound-toggle" type="button" onclick="toggleSound(event)">🔊 Sound On</button>
 
 <div class="card">
@@ -103,24 +107,45 @@ button:disabled{opacity:.45}
 </div>
 
 <div class="card" id="loginCard">
-  <h2>Admin Login</h2>
-  <input id="email" type="email" placeholder="Admin Email">
-  <input id="password" type="password" placeholder="Password" style="margin-top:8px">
+  <h2>Admin Account</h2>
+  <div class="muted" style="margin-bottom:10px">Sign in to manage your group, or create a new admin account for your own team.</div>
+  <input id="email" type="email" placeholder="Admin Email" autocomplete="email">
+  <input id="password" type="password" placeholder="Password (6+ characters)" autocomplete="current-password" style="margin-top:8px">
   <button class="primary" style="margin-top:10px;width:100%" onclick="passwordLogin()">Sign In</button>
+  <div class="divider"></div>
+  <input id="newTeamName" placeholder="Your group name (example: Saturday Soccer)" autocomplete="organization">
+  <button class="secondary" style="margin-top:8px;width:100%" onclick="createAdminAccount()">Create New Admin Account</button>
   <button class="secondary" style="margin-top:8px;width:100%" onclick="requestPasswordReset()">Forgot Password?</button>
   <div id="resetRequestStatus" class="muted" style="margin-top:8px"></div>
-  <div class="muted" style="margin-top:8px">Admin signs in with email and password.</div>
 </div>
 
 <div class="card hidden" id="adminCard">
   <div class="row"><b>Admin</b><button onclick="signOut()">Sign Out</button></div>
-  <button class="secondary" style="margin-top:12px;width:100%" onclick="copyGroupLink()">Copy Group Payment Link</button>
+
+  <h3 style="margin-top:20px">Group Settings</h3>
+  <label class="form-label" for="teamNameInput">Group name</label>
+  <input id="teamNameInput" placeholder="Example: Thursday Soccer">
+  <label class="form-label" for="gameDayInput">Regular game day</label>
+  <select id="gameDayInput">
+    <option value="0">Sunday</option>
+    <option value="1">Monday</option>
+    <option value="2">Tuesday</option>
+    <option value="3">Wednesday</option>
+    <option value="4">Thursday</option>
+    <option value="5">Friday</option>
+    <option value="6">Saturday</option>
+  </select>
+  <label class="form-label" for="weeklyFeeInput">Weekly player fee</label>
+  <input id="weeklyFeeInput" type="number" min="0" step="0.01" placeholder="10">
+  <button class="primary" style="margin-top:10px;width:100%" onclick="saveGroupSettings()">Save Group Settings</button>
+
+  <button class="secondary" style="margin-top:12px;width:100%" onclick="copyGroupLink()">Copy This Group’s Player Link</button>
   <div class="row" style="margin-top:12px">
     <input id="newPlayer" placeholder="Player name">
     <button class="primary" onclick="addPlayer()">Add</button>
   </div>
   <h3 style="margin-top:22px">Week Settings</h3>
-  <div class="muted" style="margin-bottom:8px">Choose the Thursday game date.</div>
+  <div class="muted" style="margin-bottom:8px">Choose the game date.</div>
   <input id="weekDateInput" type="date">
   <button class="primary" style="margin-top:10px;width:100%" onclick="createOrOpenWeek()">Create / Open Week</button>
   <button class="secondary" style="margin-top:8px;width:100%" onclick="startSelectedWeekFresh()">Start Selected Week Fresh</button>
@@ -246,13 +271,24 @@ function setupSoundEffects(){
 function setStatus(msg,error=false){const e=document.getElementById("summary");e.textContent=msg;e.style.color=error?"#b33":"#152018"}
 function money(n){return "$"+Number(n||0).toFixed(2).replace(".00","")}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function thursdayISO(){
+function nextGameDateISO(gameDay=4){
   const d=new Date();
   const day=d.getDay();
-  let diff=4-day;
+  let diff=Number(gameDay)-day;
   if(diff<0)diff+=7;
   d.setDate(d.getDate()+diff);
   return d.toISOString().slice(0,10);
+}
+function requestedTeamId(){
+  const params=new URLSearchParams(location.search);
+  return params.get("team")||localStorage.getItem("ws_last_team_id")||"";
+}
+function rememberTeam(teamId){
+  if(!teamId)return;
+  localStorage.setItem("ws_last_team_id",teamId);
+  const url=new URL(location.href);
+  url.searchParams.set("team",teamId);
+  history.replaceState(null,"",url.pathname+url.search);
 }
 function formatGameDate(iso){
   if(!iso)return "";
@@ -410,6 +446,48 @@ async function passwordLogin(){
   }
 }
 
+async function createAdminAccount(){
+  const email=document.getElementById("email").value.trim();
+  const password=document.getElementById("password").value;
+  const groupName=document.getElementById("newTeamName").value.trim();
+  const status=document.getElementById("resetRequestStatus");
+
+  if(!email||!password)return alert("Enter your email and a password.");
+  if(password.length<6)return alert("Password must be at least 6 characters.");
+  if(!groupName)return alert("Enter your group name.");
+
+  status.textContent="Creating your admin account...";
+  status.style.color="#6d746f";
+
+  try{
+    localStorage.setItem("ws_pending_team_name",groupName);
+    const redirectTo=location.origin+location.pathname;
+    const res=await fetch(SB_URL+"/auth/v1/signup?redirect_to="+encodeURIComponent(redirectTo),{
+      method:"POST",
+      headers:{"apikey":SB_KEY,"Content-Type":"application/json"},
+      body:JSON.stringify({email,password})
+    });
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(data.msg||data.message||data.error_description||"Could not create account.");
+
+    if(data.access_token){
+      accessToken=data.access_token;
+      userId=data.user?.id||decodeJwt(accessToken)?.sub||"";
+      localStorage.setItem("ts_access_token",accessToken);
+      localStorage.setItem("ts_user_id",userId);
+      await load();
+      alert("Your admin account and private group are ready.");
+    }else{
+      status.textContent="Account created. Check your email to confirm it, then sign in.";
+      status.style.color="#14823b";
+    }
+  }catch(e){
+    localStorage.removeItem("ws_pending_team_name");
+    status.textContent="Account error: "+e.message;
+    status.style.color="#b33";
+  }
+}
+
 async function requestPasswordReset(){
   const email=document.getElementById("email").value.trim();
   const status=document.getElementById("resetRequestStatus");
@@ -495,17 +573,24 @@ async function ensureTeamAndWeek(){
     );
 
     if(!owned.length){
+      const pendingName=(localStorage.getItem("ws_pending_team_name")||"").trim();
       owned=await api("/rest/v1/teams",{
         method:"POST",
-        body:{name:"Thursday Soccer",weekly_fee:10,owner_id:userId}
+        body:{name:pendingName||"My Soccer Group",weekly_fee:10,game_day:4,owner_id:userId}
       });
+      localStorage.removeItem("ws_pending_team_name");
     }
-    team=owned[0];
-  }
-
-  if(!team){
-    const list=await api("/rest/v1/teams?select=*&order=created_at.asc&limit=1");
-    if(list.length)team=list[0];
+    team=owned[0]||null;
+    if(team)rememberTeam(team.id);
+  }else{
+    const sharedTeamId=requestedTeamId();
+    if(sharedTeamId){
+      const list=await api("/rest/v1/teams?id=eq."+encodeURIComponent(sharedTeamId)+"&select=*&limit=1");
+      if(list.length){
+        team=list[0];
+        localStorage.setItem("ws_last_team_id",team.id);
+      }
+    }
   }
 
   if(!team)return;
@@ -517,7 +602,7 @@ async function ensureTeamAndWeek(){
   );
 
   if(!weeks.length && userId && team.owner_id===userId){
-    const start=thursdayISO();
+    const start=nextGameDateISO(team.game_day??4);
     const created=await api("/rest/v1/weeks",{
       method:"POST",
       body:{
@@ -548,8 +633,9 @@ async function load(){
     await ensureTeamAndWeek();
 
     if(!team){
-      setStatus("No team has been created yet.");
-      document.getElementById("weekText").textContent="Admin: sign in to create Thursday Soccer.";
+      setStatus("Welcome to Weekly Soccer");
+      document.getElementById("weekText").textContent="Open your group’s player link, or sign in to create and manage your own group.";
+      document.getElementById("players").innerHTML='<div class="muted">Each admin has a separate group and player list.</div>';
       return;
     }
 
@@ -587,6 +673,16 @@ async function load(){
 
 function render(){
   const paidIds=new Set(payments.map(x=>x.player_id));
+  const appTitle=document.getElementById("appTitle");
+  if(appTitle)appTitle.textContent="⚽ "+(team?.name||"Weekly Soccer");
+  document.title=team?.name?team.name+" — Weekly Soccer":"Weekly Soccer";
+
+  const teamNameInput=document.getElementById("teamNameInput");
+  const gameDayInput=document.getElementById("gameDayInput");
+  const weeklyFeeInput=document.getElementById("weeklyFeeInput");
+  if(teamNameInput)teamNameInput.value=team?.name||"";
+  if(gameDayInput)gameDayInput.value=String(team?.game_day??4);
+  if(weeklyFeeInput)weeklyFeeInput.value=Number(team?.weekly_fee||10);
 
   const cashInput=document.getElementById("cashTag");
   const venmoInput=document.getElementById("venmoUrl");
@@ -1053,6 +1149,26 @@ async function deleteExpense(expenseId){
     await load();
   }catch(e){alert("Could not delete expense: "+e.message)}
 }
+async function saveGroupSettings(){
+  if(!team||!userId||team.owner_id!==userId)return;
+  const name=document.getElementById("teamNameInput").value.trim();
+  const gameDay=Number(document.getElementById("gameDayInput").value);
+  const weeklyFee=Number(document.getElementById("weeklyFeeInput").value);
+  if(!name)return alert("Enter a group name.");
+  if(!Number.isInteger(gameDay)||gameDay<0||gameDay>6)return alert("Choose a valid game day.");
+  if(!Number.isFinite(weeklyFee)||weeklyFee<0)return alert("Enter a valid weekly fee.");
+
+  try{
+    const rows=await api("/rest/v1/teams?id=eq."+team.id,{
+      method:"PATCH",
+      body:{name,game_day:gameDay,weekly_fee:weeklyFee}
+    });
+    team=rows?.[0]||{...team,name,game_day:gameDay,weekly_fee:weeklyFee};
+    render();
+    alert("Group settings saved.");
+  }catch(e){alert("Could not save group settings: "+e.message)}
+}
+
 async function savePaymentSettings(){if(!team||!userId)return;const cashTag=document.getElementById("cashTag").value.trim().replace(/^\$/,"");const venmoUrl=document.getElementById("venmoUrl").value.trim();try{await api("/rest/v1/teams?id=eq."+team.id,{method:"PATCH",body:{cash_tag:cashTag||null,venmo_url:venmoUrl||null}});team.cash_tag=cashTag||null;team.venmo_url=venmoUrl||null;updatePayerStatus();alert("Payment settings saved.")}catch(e){alert(e.message)}}
 function selectedPlayer(){
   const id=document.getElementById("payerSelect").value;
@@ -1088,7 +1204,18 @@ function updatePayerStatus(){
 
 function openCashApp(){const player=selectedPlayer();if(!player)return alert("Select your name first.");if(!team?.cash_tag)return alert("Cash App is not set up yet.");const tag=String(team.cash_tag).replace(/^\$/,"");const amount=Number(team.weekly_fee||10);location.href="https://cash.app/$"+encodeURIComponent(tag)+"/"+amount}
 function openVenmo(){const player=selectedPlayer();if(!player)return alert("Select your name first.");if(!team?.venmo_url)return alert("Venmo is not set up yet.");location.href=team.venmo_url}
-async function copyGroupLink(){const link=location.origin+location.pathname;try{await navigator.clipboard.writeText(link);alert("Group payment link copied.")}catch(e){prompt("Copy this link:",link)}}
+async function copyGroupLink(){
+  if(!team)return;
+  const url=new URL(location.origin+location.pathname);
+  url.searchParams.set("team",team.id);
+  const link=url.toString();
+  try{
+    await navigator.clipboard.writeText(link);
+    alert("Your group’s player link was copied.");
+  }catch(e){
+    prompt("Copy your group’s player link:",link);
+  }
+}
 async function addPlayer(){
   const input=document.getElementById("newPlayer");
   const name=input.value.trim();
