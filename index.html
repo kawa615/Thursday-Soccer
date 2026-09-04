@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#14823b">
+<meta name="application-name" content="Weekly Soccer">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Weekly Soccer">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
 <title>Weekly Soccer</title>
 <style>
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f7f5;margin:0;color:#152018}
@@ -27,6 +34,7 @@ button:disabled{opacity:.45}
 .rsvp-list{margin-top:10px;padding:12px;border-radius:12px;background:#f5f7f5;line-height:1.8}
 .sound-scroll{max-height:420px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .sound-toggle{position:fixed;right:14px;bottom:max(14px,env(safe-area-inset-bottom));z-index:50;box-shadow:0 3px 14px #0003}
+.install-toggle{position:fixed;left:14px;bottom:max(14px,env(safe-area-inset-bottom));z-index:50;box-shadow:0 3px 14px #0003}
 .app-brand{text-align:center;color:#14823b;font-weight:800;letter-spacing:.08em;text-transform:uppercase;font-size:13px;margin-top:8px}
 .form-label{display:block;font-weight:700;margin:12px 0 6px}
 .divider{height:1px;background:#e5ebe6;margin:18px 0}
@@ -38,6 +46,7 @@ button:disabled{opacity:.45}
 <div class="app-brand">Weekly Soccer</div>
 <h1 id="appTitle">⚽ Weekly Soccer</h1>
 <button id="soundToggle" class="secondary sound-toggle" type="button" onclick="toggleSound(event)">🔊 Sound On</button>
+<button id="installButton" class="primary install-toggle" type="button" onclick="installWeeklySoccer()">📲 Install App</button>
 
 <div class="card">
   <div id="summary" class="status">Loading...</div>
@@ -184,6 +193,7 @@ let team=null,week=null,weeks=[],players=[],allTeamPlayers=[],payments=[],weekRo
 let soundEnabled=localStorage.getItem("ts_sound")!=="off";
 let audioContext=null;
 let lastScrollSound=0;
+let deferredInstallPrompt=null;
 
 function getAudioContext(){
   if(!audioContext){
@@ -233,6 +243,55 @@ function toggleSound(event){
   localStorage.setItem("ts_sound",soundEnabled?"on":"off");
   updateSoundButton();
   if(soundEnabled)playSound("select");
+}
+
+function isInstalledApp(){
+  return window.matchMedia("(display-mode: standalone)").matches||window.navigator.standalone===true;
+}
+
+function updateInstallButton(){
+  const button=document.getElementById("installButton");
+  if(button)button.classList.toggle("hidden",isInstalledApp());
+}
+
+async function installWeeklySoccer(){
+  if(isInstalledApp())return;
+
+  if(deferredInstallPrompt){
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice.catch(()=>null);
+    deferredInstallPrompt=null;
+    updateInstallButton();
+    return;
+  }
+
+  const isiPhone=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  if(isiPhone){
+    alert("To install Weekly Soccer on iPhone:\n\n1. Tap the Share button in Safari\n2. Tap Add to Home Screen\n3. Tap Add");
+  }else{
+    alert("Open your browser menu and choose Install app or Add to Home screen.");
+  }
+}
+
+function setupInstallExperience(){
+  updateInstallButton();
+
+  window.addEventListener("beforeinstallprompt",event=>{
+    event.preventDefault();
+    deferredInstallPrompt=event;
+    updateInstallButton();
+  });
+
+  window.addEventListener("appinstalled",()=>{
+    deferredInstallPrompt=null;
+    updateInstallButton();
+  });
+
+  if("serviceWorker" in navigator){
+    window.addEventListener("load",()=>{
+      navigator.serviceWorker.register("./sw.js").catch(()=>{});
+    });
+  }
 }
 
 function setupSoundEffects(){
@@ -1283,6 +1342,7 @@ async function removeFromWeek(playerId){
 
 async function markPaid(player_id){if(!team||!week||!userId)return;try{await api("/rest/v1/payments",{method:"POST",body:{team_id:team.id,week_id:week.id,player_id,amount:team.weekly_fee,method:"other",created_by:userId}});await load()}catch(e){alert(e.message)}}
 async function markUnpaid(player_id){if(!week||!userId)return;try{await api("/rest/v1/payments?week_id=eq."+week.id+"&player_id=eq."+player_id,{method:"DELETE"});await load()}catch(e){alert(e.message)}}
+setupInstallExperience();
 setupSoundEffects();
 load();
 </script>
