@@ -170,6 +170,10 @@ button:disabled{opacity:.45}
   <button class="secondary" style="margin-top:8px;width:100%" onclick="updateWeekDate()">Save New Week Date</button>
   <button class="danger" style="margin-top:8px;width:100%" onclick="deleteSelectedWeek()">Delete Selected Week</button>
 
+  <h3 style="margin-top:22px">Weekly Report</h3>
+  <div class="muted" style="margin-bottom:8px">Create an image for the selected week with attendance, paid/unpaid players, field rent, expenses, and the balance carried to next week.</div>
+  <button class="primary" style="width:100%" onclick="exportWeeklyReport()">📤 Share / Save Weekly Report Image</button>
+
   <h3 style="margin-top:22px">Balance Settings</h3>
   <input id="openingBalanceInput" type="number" step="0.01" placeholder="Balance from Last Week">
   <input id="fieldRentInput" type="number" step="0.01" placeholder="Field Rent" style="margin-top:8px">
@@ -336,6 +340,210 @@ function setupSoundEffects(){
 function setStatus(msg,error=false){const e=document.getElementById("summary");e.textContent=msg;e.style.color=error?"#b33":"#152018"}
 function money(n){return "$"+Number(n||0).toFixed(2).replace(".00","")}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+function drawRoundRect(ctx,x,y,width,height,radius,fill){
+  const r=Math.min(radius,width/2,height/2);
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+width,y,x+width,y+height,r);
+  ctx.arcTo(x+width,y+height,x,y+height,r);
+  ctx.arcTo(x,y+height,x,y,r);
+  ctx.arcTo(x,y,x+width,y,r);
+  ctx.closePath();
+  ctx.fillStyle=fill;
+  ctx.fill();
+}
+
+function fitReportText(ctx,value,maxWidth){
+  const text=String(value||"");
+  if(ctx.measureText(text).width<=maxWidth)return text;
+  let shortened=text;
+  while(shortened.length>1&&ctx.measureText(shortened+"…").width>maxWidth){
+    shortened=shortened.slice(0,-1);
+  }
+  return shortened+"…";
+}
+
+async function exportWeeklyReport(){
+  if(!team||!week)return alert("Select a week first.");
+
+  const reportPlayers=[...players].sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+  const paidIds=new Set(payments.map(item=>String(item.player_id)));
+  const paidPlayers=reportPlayers.filter(player=>paidIds.has(String(player.id)));
+  const unpaidPlayers=reportPlayers.filter(player=>!paidIds.has(String(player.id)));
+  const opening=Number(week.opening_balance||0);
+  const collected=payments.reduce((sum,item)=>sum+Number(item.amount||0),0);
+  const fieldRent=Number(week.field_rent||0);
+  const deductedRent=week.field_rent_paid?fieldRent:0;
+  const otherExpenses=expenses.reduce((sum,item)=>sum+Number(item.amount||0),0);
+  const remaining=opening+collected-deductedRent-otherExpenses;
+
+  const width=1080;
+  const pad=64;
+  const playerRows=Math.max(reportPlayers.length,1);
+  const expenseRows=Math.max(expenses.length,1);
+  const height=Math.max(1500,1040+playerRows*64+expenseRows*62);
+  const canvas=document.createElement("canvas");
+  canvas.width=width;
+  canvas.height=height;
+  const ctx=canvas.getContext("2d");
+  if(!ctx)return alert("Could not create the report image.");
+
+  ctx.fillStyle="#eef4ef";
+  ctx.fillRect(0,0,width,height);
+
+  const headerGradient=ctx.createLinearGradient(0,0,width,330);
+  headerGradient.addColorStop(0,"#0d6b35");
+  headerGradient.addColorStop(1,"#159447");
+  ctx.fillStyle=headerGradient;
+  ctx.fillRect(0,0,width,330);
+
+  ctx.fillStyle="#ffffff";
+  ctx.font="800 54px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.fillText(fitReportText(ctx,team.name||"Weekly Soccer",width-pad*2),pad,96);
+  ctx.font="700 32px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.fillStyle="#dff7e7";
+  ctx.fillText("WEEKLY GAME REPORT",pad,150);
+  ctx.font="500 29px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.fillStyle="#ffffff";
+  ctx.fillText(formatGameDate(week.starts_on),pad,205);
+
+  drawRoundRect(ctx,pad,244,width-pad*2,62,18,"rgba(255,255,255,.16)");
+  ctx.font="700 25px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.fillStyle="#ffffff";
+  ctx.fillText(reportPlayers.length+" played",pad+24,284);
+  ctx.textAlign="center";
+  ctx.fillText(paidPlayers.length+" paid",width/2,284);
+  ctx.textAlign="right";
+  ctx.fillText(unpaidPlayers.length+" unpaid",width-pad-24,284);
+  ctx.textAlign="left";
+
+  let y=374;
+  ctx.fillStyle="#17351f";
+  ctx.font="800 34px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.fillText("Money Summary",pad,y);
+
+  const cards=[
+    ["Balance from Last Week",money(opening),"#17351f"],
+    ["Collected This Week",money(collected),"#14823b"],
+    [week.field_rent_paid?"Field Rent — Paid":"Field Rent — Not Deducted",money(fieldRent),"#9a5b00"],
+    ["Other Expenses",money(otherExpenses),"#b33"],
+    ["Balance for Next Week",money(remaining),remaining>=0?"#14823b":"#b33"],
+    ["Player Fee",money(team.weekly_fee||0),"#17351f"]
+  ];
+  const gap=20;
+  const cardWidth=(width-pad*2-gap)/2;
+  const cardHeight=112;
+  cards.forEach((card,index)=>{
+    const col=index%2;
+    const row=Math.floor(index/2);
+    const x=pad+col*(cardWidth+gap);
+    const top=y+28+row*(cardHeight+gap);
+    drawRoundRect(ctx,x,top,cardWidth,cardHeight,18,"#ffffff");
+    ctx.fillStyle="#68766c";
+    ctx.font="600 21px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+    ctx.fillText(fitReportText(ctx,card[0],cardWidth-36),x+18,top+36);
+    ctx.fillStyle=card[2];
+    ctx.font="800 32px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+    ctx.fillText(card[1],x+18,top+82);
+  });
+
+  y+=28+3*(cardHeight+gap)+42;
+  ctx.fillStyle="#17351f";
+  ctx.font="800 34px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.fillText("Players",pad,y);
+  y+=24;
+
+  if(!reportPlayers.length){
+    drawRoundRect(ctx,pad,y,width-pad*2,54,14,"#ffffff");
+    ctx.fillStyle="#68766c";
+    ctx.font="500 23px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+    ctx.fillText("No players were listed for this week.",pad+20,y+35);
+    y+=70;
+  }else{
+    reportPlayers.forEach((player,index)=>{
+      const paid=paidIds.has(String(player.id));
+      drawRoundRect(ctx,pad,y,width-pad*2,52,14,"#ffffff");
+      ctx.beginPath();
+      ctx.arc(pad+25,y+26,9,0,Math.PI*2);
+      ctx.fillStyle=paid?"#159447":"#d94848";
+      ctx.fill();
+      ctx.fillStyle="#17351f";
+      ctx.font="650 24px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+      ctx.fillText(fitReportText(ctx,(index+1)+". "+player.name,width-pad*2-220),pad+48,y+34);
+      ctx.textAlign="right";
+      ctx.fillStyle=paid?"#14823b":"#b33";
+      ctx.font="800 23px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+      ctx.fillText(paid?"PAID":"UNPAID",width-pad-20,y+34);
+      ctx.textAlign="left";
+      y+=64;
+    });
+  }
+
+  y+=22;
+  ctx.fillStyle="#17351f";
+  ctx.font="800 34px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.fillText("Expenses",pad,y);
+  y+=24;
+
+  if(!expenses.length){
+    drawRoundRect(ctx,pad,y,width-pad*2,52,14,"#ffffff");
+    ctx.fillStyle="#68766c";
+    ctx.font="500 23px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+    ctx.fillText("No other expenses for this week.",pad+20,y+34);
+    y+=64;
+  }else{
+    expenses.forEach(item=>{
+      drawRoundRect(ctx,pad,y,width-pad*2,50,14,"#ffffff");
+      ctx.fillStyle="#17351f";
+      ctx.font="600 23px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+      ctx.fillText(fitReportText(ctx,item.description,width-pad*2-230),pad+20,y+33);
+      ctx.textAlign="right";
+      ctx.fillStyle="#b33";
+      ctx.font="800 23px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+      ctx.fillText("-"+money(item.amount),width-pad-20,y+33);
+      ctx.textAlign="left";
+      y+=62;
+    });
+  }
+
+  ctx.fillStyle="#728078";
+  ctx.font="500 20px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.fillText("Generated by Weekly Soccer",pad,height-46);
+  ctx.textAlign="right";
+  ctx.fillText(new Date().toLocaleDateString("en-US"),width-pad,height-46);
+  ctx.textAlign="left";
+
+  const blob=await new Promise(resolve=>canvas.toBlob(resolve,"image/png",1));
+  if(!blob)return alert("Could not create the report image.");
+
+  const safeName=String(team.name||"weekly-soccer").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+  const filename=(safeName||"weekly-soccer")+"-"+week.starts_on+"-report.png";
+
+  try{
+    const file=new File([blob],filename,{type:"image/png"});
+    if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
+      await navigator.share({
+        title:(team.name||"Weekly Soccer")+" — "+formatGameDate(week.starts_on),
+        text:"Weekly game report",
+        files:[file]
+      });
+      return;
+    }
+  }catch(error){
+    if(error?.name==="AbortError")return;
+  }
+
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement("a");
+  link.href=url;
+  link.download=filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),3000);
+  alert("Weekly report image saved.");
+}
 function nextGameDateISO(gameDay=4){
   const d=new Date();
   const day=d.getDay();
