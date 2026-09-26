@@ -173,10 +173,29 @@ button:disabled{opacity:.45}
 <div class="card hidden" id="adminCard">
   <div class="row"><b>Admin</b><button onclick="signOut()">Sign Out</button></div>
   <section id="platformSignupPanel" class="hidden" aria-label="New admin registrations" style="margin-top:18px;padding:14px;border-radius:14px;background:#edf4ee">
-    <div class="row"><b>New Admin Signups</b><button class="secondary" type="button" onclick="refreshPlatformSignups()">Refresh</button></div>
+    <div class="row"><b>New Admin Signups</b><button class="secondary" type="button" onclick="refreshPlatformManagement()">Refresh</button></div>
     <div id="platformSignupCount" class="status" style="margin-top:8px">Loading registrations…</div>
     <div id="platformSignupDates" class="muted" style="margin-top:5px"></div>
     <button id="platformSignupSeen" class="secondary hidden" type="button" style="margin-top:10px;width:100%" onclick="markPlatformSignupsSeen()">Mark New Signups Seen</button>
+    <div class="divider"></div>
+    <b>Admin Directory</b>
+    <div class="muted" style="margin:6px 0">Admins appear here after they choose to share their contact and group overview.</div>
+    <div id="platformDirectory" class="muted">Loading…</div>
+    <label class="form-label" for="monthlySubscriptionLink">Monthly subscription payment link (Stripe)</label>
+    <input id="monthlySubscriptionLink" type="url" placeholder="https://buy.stripe.com/..." inputmode="url">
+    <button class="secondary" type="button" style="margin-top:8px;width:100%" onclick="saveMonthlySubscriptionLink()">Save Subscription Link</button>
+    <div id="monthlySubscriptionStatus" class="muted" style="margin-top:6px">Set your price and create a monthly Payment Link in Stripe, then paste it here.</div>
+  </section>
+
+  <section id="adminPrivacyPanel" class="hidden" style="margin-top:18px;padding:14px;border-radius:14px;background:#edf4ee">
+    <b>Contact & Group Sharing</b>
+    <p class="muted">If you agree, the Weekly Soccer app owner can see your account email, group name, players, weekly attendance and payment status to offer support and contact you about a subscription. You can turn this off at any time.</p>
+    <label class="row" style="justify-content:flex-start;gap:10px">
+      <input id="shareTeamConsent" type="checkbox" style="width:auto" onchange="toggleTeamSharing(this.checked)">
+      <span>Share my contact and group overview with the app owner</span>
+    </label>
+    <div id="sharingStatus" class="muted" style="margin-top:8px"></div>
+    <a id="subscriptionCheckout" class="primary hidden" target="_blank" rel="noopener noreferrer" style="text-decoration:none;margin-top:12px;padding:11px 14px;border-radius:12px">Open Monthly Subscription Checkout</a>
   </section>
 
   <h3 style="margin-top:20px">Top Photo</h3>
@@ -249,6 +268,7 @@ let accessToken=localStorage.getItem("ts_access_token")||"";
 let userId=localStorage.getItem("ts_user_id")||"";
 let team=null,week=null,weeks=[],players=[],allTeamPlayers=[],payments=[],weekRoster=[],rsvps=[],expenses=[],teamAssignments=[];
 let platformSignupSummary=null;
+let platformContacts=[];
 let soundEnabled=localStorage.getItem("ts_sound")!=="off";
 let audioContext=null;
 let lastScrollSound=0;
@@ -986,6 +1006,9 @@ async function load(){
     render();
     if(team.id==="5e83360b-1b47-4600-a7dd-b1031e59940e"&&userId===team.owner_id){
       refreshPlatformSignups();
+      loadPlatformDirectory();
+    }else if(userId&&team.owner_id===userId){
+      loadSharingAndBilling();
     }
   }catch(e){
     setStatus("Connection error: "+e.message,true);
@@ -1027,10 +1050,161 @@ function markPlatformSignupsSeen(){
   refreshPlatformSignups();
 }
 
+const PLATFORM_TEAM_ID="5e83360b-1b47-4600-a7dd-b1031e59940e";
+
+function isStripeLink(value){
+  try{
+    const url=new URL(value);
+    return url.protocol==="https:"&&url.hostname==="buy.stripe.com"&&url.pathname.length>1;
+  }catch(error){return false}
+}
+
+async function refreshPlatformManagement(){
+  await Promise.all([refreshPlatformSignups(),loadPlatformDirectory()]);
+}
+
+async function loadPlatformDirectory(){
+  if(!team||team.id!==PLATFORM_TEAM_ID||userId!==team.owner_id)return;
+  const box=document.getElementById("platformDirectory");
+  try{
+    const contacts=await api("/rest/v1/platform_team_contacts?select=team_id,contact_email,shared_at&order=shared_at.desc");
+    platformContacts=contacts.filter(item=>item.team_id!==PLATFORM_TEAM_ID);
+    if(!platformContacts.length){
+      box.textContent="No admins have chosen to share their contact and group yet.";
+      return;
+    }
+    const ids=platformContacts.map(item=>item.team_id).filter(id=>/^[a-f0-9-]{36}$/i.test(id));
+    const groups=ids.length
+      ? await api("/rest/v1/teams?id=in.("+ids.join(",")+")&select=id,name,created_at")
+      : [];
+    const names=new Map(groups.map(group=>[String(group.id),group]));
+    box.innerHTML=platformContacts.map(item=>{
+      const group=names.get(String(item.team_id));
+      if(!group)return "";
+      const id=String(item.team_id);
+      const email=String(item.contact_email);
+      const subject=encodeURIComponent("Weekly Soccer admin subscription");
+      const billing=team.subscription_link&&isStripeLink(team.subscription_link)
+        ? "%0A%0ASubscription link: "+encodeURIComponent(team.subscription_link)
+        : "";
+      return '<div class="team-player"><b>'+escapeHtml(group.name)+'</b>'+
+        '<div class="muted">Joined '+escapeHtml(new Date(group.created_at).toLocaleString())+'</div>'+
+        '<div style="margin-top:6px">'+escapeHtml(email)+'</div>'+
+        '<div class="team-player-actions">'+
+        '<a class="secondary" style="text-decoration:none;border-radius:9px;padding:8px" href="mailto:'+encodeURIComponent(email)+'?subject='+subject+'&body='+billing+'">Email Admin</a>'+
+        '<button class="secondary" type="button" onclick="viewPlatformTeam(\''+id+'\')">View Group</button>'+
+        '</div><div id="platformTeam_'+id+'" class="muted"></div></div>';
+    }).join("");
+  }catch(error){
+    box.textContent="Could not load admin directory: "+error.message;
+  }
+}
+
+async function viewPlatformTeam(teamId){
+  if(!team||team.id!==PLATFORM_TEAM_ID||userId!==team.owner_id)return;
+  const target=document.getElementById("platformTeam_"+teamId);
+  if(!target)return;
+  target.textContent="Loading group…";
+  try{
+    const allowed=await api("/rest/v1/platform_team_contacts?team_id=eq."+encodeURIComponent(teamId)+"&select=team_id&limit=1");
+    if(!allowed.length)throw new Error("This admin has stopped sharing their group.");
+    const [roster,groupWeeks]=await Promise.all([
+      api("/rest/v1/players?team_id=eq."+encodeURIComponent(teamId)+"&select=id,name,active&order=name.asc"),
+      api("/rest/v1/weeks?team_id=eq."+encodeURIComponent(teamId)+"&select=id,starts_on,opening_balance,field_rent,field_rent_paid&order=starts_on.desc&limit=1")
+    ]);
+    const latest=groupWeeks[0];
+    let yesIds=new Set(),paidIds=new Set(),collected=0;
+    if(latest){
+      const [votes,paid]=await Promise.all([
+        api("/rest/v1/rsvps?week_id=eq."+latest.id+"&select=player_id,response"),
+        api("/rest/v1/payments?week_id=eq."+latest.id+"&select=player_id,amount")
+      ]);
+      yesIds=new Set(votes.filter(v=>v.response==="yes").map(v=>String(v.player_id)));
+      paidIds=new Set(paid.map(p=>String(p.player_id)));
+      collected=paid.reduce((sum,p)=>sum+Number(p.amount||0),0);
+    }
+    target.innerHTML='<div style="margin-top:12px"><b>Players ('+roster.length+')</b>'+
+      (latest?'<div class="muted">Latest game: '+escapeHtml(formatGameDate(latest.starts_on))+
+        ' • Collected: '+money(collected)+' • Field rent: '+money(latest.field_rent||0)+
+        (latest.field_rent_paid?' paid':' unpaid')+'</div>':'<div class="muted">No weeks yet.</div>')+
+      (roster.length?roster.map(p=>'<div class="player"><span>'+escapeHtml(p.name)+(p.active===false?' (inactive)':'')+'</span>'+
+        '<small class="'+(paidIds.has(String(p.id))?'ok':'bad')+'">'+
+        (latest?(yesIds.has(String(p.id))?'Playing':'Not playing')+' • '+(paidIds.has(String(p.id))?'Paid':'Unpaid'):'—')+
+        '</small></div>').join(""):'<div class="muted">No players yet.</div>')+'</div>';
+  }catch(error){target.textContent="Could not view this group: "+error.message}
+}
+
+async function loadSharingAndBilling(){
+  if(!team||!userId||team.owner_id!==userId||team.id===PLATFORM_TEAM_ID)return;
+  const box=document.getElementById("sharingStatus");
+  try{
+    const [consents,operator]=await Promise.all([
+      api("/rest/v1/platform_team_contacts?team_id=eq."+team.id+"&select=team_id&limit=1"),
+      api("/rest/v1/teams?id=eq."+PLATFORM_TEAM_ID+"&select=subscription_link&limit=1")
+    ]);
+    document.getElementById("shareTeamConsent").checked=!!consents.length;
+    box.textContent=consents.length?"Sharing is on. You can turn it off at any time.":"Sharing is off.";
+    const link=operator?.[0]?.subscription_link;
+    const checkout=document.getElementById("subscriptionCheckout");
+    checkout.classList.toggle("hidden",!isStripeLink(link));
+    if(isStripeLink(link))checkout.href=link;
+    else checkout.removeAttribute("href");
+  }catch(error){box.textContent="Could not load sharing settings: "+error.message}
+}
+
+async function toggleTeamSharing(enabled){
+  const checkbox=document.getElementById("shareTeamConsent");
+  const box=document.getElementById("sharingStatus");
+  if(!team||!userId||team.owner_id!==userId||team.id===PLATFORM_TEAM_ID)return;
+  checkbox.disabled=true;
+  box.textContent="Saving…";
+  try{
+    if(enabled){
+      const email=decodeJwt(accessToken)?.email;
+      if(!email)throw new Error("Please sign in again so your verified email can be shared.");
+      await api("/rest/v1/platform_team_contacts?on_conflict=team_id",{
+        method:"POST",
+        prefer:"resolution=merge-duplicates,return=representation",
+        body:{team_id:team.id,contact_email:email,shared_at:new Date().toISOString()}
+      });
+      box.textContent="Sharing is on. The app owner can view your group and contact you.";
+    }else{
+      await api("/rest/v1/platform_team_contacts?team_id=eq."+team.id,{method:"DELETE"});
+      box.textContent="Sharing is off. Your contact has been removed from the directory.";
+    }
+  }catch(error){
+    checkbox.checked=!enabled;
+    box.textContent="Could not save sharing setting: "+error.message;
+  }finally{checkbox.disabled=false}
+}
+
+async function saveMonthlySubscriptionLink(){
+  if(!team||team.id!==PLATFORM_TEAM_ID||userId!==team.owner_id)return;
+  const input=document.getElementById("monthlySubscriptionLink");
+  const status=document.getElementById("monthlySubscriptionStatus");
+  const value=input.value.trim();
+  if(value&&!isStripeLink(value)){
+    status.textContent="Enter a Stripe Payment Link starting with https://buy.stripe.com/ or leave blank to remove it.";
+    return;
+  }
+  try{
+    const rows=await api("/rest/v1/teams?id=eq."+team.id,{
+      method:"PATCH",body:{subscription_link:value||null}
+    });
+    team=rows?.[0]||{...team,subscription_link:value||null};
+    status.textContent=value?"Subscription link saved. Admins can now open checkout.":"Subscription link removed.";
+    await loadPlatformDirectory();
+  }catch(error){status.textContent="Could not save subscription link: "+error.message}
+}
+
 function render(){
   const paidIds=new Set(payments.map(x=>x.player_id));
   const platformPanel=document.getElementById("platformSignupPanel");
   if(platformPanel)platformPanel.classList.toggle("hidden",!(team?.id==="5e83360b-1b47-4600-a7dd-b1031e59940e"&&userId===team.owner_id));
+  const privacyPanel=document.getElementById("adminPrivacyPanel");
+  if(privacyPanel)privacyPanel.classList.toggle("hidden",!(userId&&team?.owner_id===userId&&team.id!=="5e83360b-1b47-4600-a7dd-b1031e59940e"));
+  const linkInput=document.getElementById("monthlySubscriptionLink");
+  if(linkInput&&team?.id==="5e83360b-1b47-4600-a7dd-b1031e59940e")linkInput.value=team.subscription_link||"";
   const appTitle=document.getElementById("appTitle");
   if(appTitle)appTitle.textContent="⚽ "+(team?.name||"Weekly Soccer");
   document.title=team?.name?team.name+" — Weekly Soccer":"Weekly Soccer";
@@ -2051,7 +2225,7 @@ setupSoundEffects();
 load();
 setInterval(()=>{
   if(document.visibilityState==="visible"&&team?.id==="5e83360b-1b47-4600-a7dd-b1031e59940e"&&userId===team.owner_id){
-    refreshPlatformSignups();
+    refreshPlatformManagement();
   }
 },60000);
 </script>
