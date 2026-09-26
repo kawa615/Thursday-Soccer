@@ -1,4 +1,4 @@
-const CACHE_NAME="weekly-soccer-v5";
+const CACHE_NAME="weekly-soccer-v6";
 const APP_SHELL=["./","./index.html","./manifest.webmanifest","./icon.svg","./weekly-soccer-kick.jpg","./weekly-soccer-icon-192.png","./weekly-soccer-icon-512.png"];
 
 self.addEventListener("install",event=>{
