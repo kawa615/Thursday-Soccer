@@ -41,7 +41,16 @@ button:disabled{opacity:.45}
 .soccer-hero{height:250px;border-radius:22px;overflow:hidden;margin:8px 0 16px;box-shadow:0 8px 24px #082a1860;background:#0a2b23}
 .soccer-hero img{width:100%;height:100%;display:block;object-fit:cover;object-position:center 58%}
 @media(max-width:520px){.soccer-hero{height:190px;border-radius:18px}.soccer-hero img{object-position:55% 58%}}
-@media(max-width:520px){.pay-choice{grid-template-columns:1fr}}
+.team-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.team-column{border-radius:16px;padding:12px;min-height:100px}
+.team-column.red-team{background:#fff0f0;border:1px solid #f2caca}
+.team-column.green-team{background:#edf9f0;border:1px solid #c6e8cf}
+.team-column h3{margin:0 0 8px}
+.team-player{background:#fff;border-radius:11px;padding:9px 10px;margin:7px 0;box-shadow:0 1px 4px #0001}
+.team-player-actions{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}
+.team-player-actions button{padding:6px 8px;font-size:12px}
+.team-unassigned{margin-top:12px;padding:12px;border-radius:14px;background:#f5f7f5}
+@media(max-width:520px){.team-grid{grid-template-columns:1fr}.pay-choice{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -111,6 +120,33 @@ button:disabled{opacity:.45}
 <div class="card">
   <h2>Players</h2>
   <div id="players" class="sound-scroll"></div>
+</div>
+
+<div class="card" id="teamMakerCard">
+  <h2>Red & Green Teams</h2>
+  <div id="teamMakerWeek" class="muted">Players who vote Yes automatically appear here.</div>
+  <div id="teamAdminControls" class="hidden" style="margin-top:10px">
+    <div class="pay-choice">
+      <button class="primary" onclick="autoSplitTeams()">⚡ Auto Split Evenly</button>
+      <button class="danger" onclick="clearTeamAssignments()">Clear Teams</button>
+    </div>
+    <div class="muted" style="margin-top:6px">For manual teams, use the Red and Green buttons beside each player.</div>
+  </div>
+  <div class="team-grid">
+    <div class="team-column red-team">
+      <h3 class="bad">🔴 Red Team <span id="redTeamCount"></span></h3>
+      <div id="redTeamList"></div>
+    </div>
+    <div class="team-column green-team">
+      <h3 class="ok">🟢 Green Team <span id="greenTeamCount"></span></h3>
+      <div id="greenTeamList"></div>
+    </div>
+  </div>
+  <div id="unassignedTeamPlayers" class="team-unassigned"></div>
+  <div class="pay-choice">
+    <button class="secondary" onclick="shareTeamsImage()">📷 Share Teams Image</button>
+    <button class="secondary" onclick="shareTeamsList()">📋 Share Teams List</button>
+  </div>
 </div>
 
 <div class="card hidden" id="resetCard">
@@ -205,7 +241,7 @@ const SB_URL="https://aacbfebgypzrnvgcrrta.supabase.co";
 const SB_KEY="sb_publishable_Sk-be4OXcsyglT8HsEqngw_GLVQzZ-5";
 let accessToken=localStorage.getItem("ts_access_token")||"";
 let userId=localStorage.getItem("ts_user_id")||"";
-let team=null,week=null,weeks=[],players=[],allTeamPlayers=[],payments=[],weekRoster=[],rsvps=[],expenses=[];
+let team=null,week=null,weeks=[],players=[],allTeamPlayers=[],payments=[],weekRoster=[],rsvps=[],expenses=[],teamAssignments=[];
 let soundEnabled=localStorage.getItem("ts_sound")!=="off";
 let audioContext=null;
 let lastScrollSound=0;
@@ -918,7 +954,7 @@ async function load(){
       return;
     }
 
-    const [allPlayers,loadedPayments,loadedRoster,loadedRsvps,loadedExpenses]=await Promise.all([
+    const [allPlayers,loadedPayments,loadedRoster,loadedRsvps,loadedExpenses,loadedTeamAssignments]=await Promise.all([
       api(
         "/rest/v1/players?team_id=eq."+team.id+
         "&select=*"+
@@ -927,7 +963,8 @@ async function load(){
       week?api("/rest/v1/payments?week_id=eq."+week.id+"&select=*"):Promise.resolve([]),
       week?api("/rest/v1/week_players?week_id=eq."+week.id+"&select=player_id"):Promise.resolve([]),
       week?api("/rest/v1/rsvps?week_id=eq."+week.id+"&select=*"):Promise.resolve([]),
-      week?api("/rest/v1/expenses?week_id=eq."+week.id+"&select=*&order=spent_on.desc,created_at.desc"):Promise.resolve([])
+      week?api("/rest/v1/expenses?week_id=eq."+week.id+"&select=*&order=spent_on.desc,created_at.desc"):Promise.resolve([]),
+      week?api("/rest/v1/week_team_assignments?week_id=eq."+week.id+"&select=*&order=sort_order.asc"):Promise.resolve([])
     ]);
 
     allTeamPlayers=allPlayers;
@@ -935,6 +972,7 @@ async function load(){
     weekRoster=loadedRoster;
     rsvps=loadedRsvps;
     expenses=loadedExpenses;
+    teamAssignments=loadedTeamAssignments;
 
     players=paymentPlayersForWeek(allPlayers);
 
@@ -1100,6 +1138,277 @@ function render(){
         `;
       }).join("")
     : '<div class="muted">No players added for this week.</div>';
+
+  renderTeamMaker();
+}
+
+function assignedTeamData(){
+  const eligibleIds=new Set(players.map(player=>String(player.id)));
+  const playerMap=new Map(players.map(player=>[String(player.id),player]));
+  const visible=teamAssignments
+    .filter(item=>eligibleIds.has(String(item.player_id)))
+    .sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0));
+  return {
+    red:visible.filter(item=>item.color==="red").map(item=>playerMap.get(String(item.player_id))).filter(Boolean),
+    green:visible.filter(item=>item.color==="green").map(item=>playerMap.get(String(item.player_id))).filter(Boolean),
+    assignedIds:new Set(visible.map(item=>String(item.player_id)))
+  };
+}
+
+function teamPlayerHtml(player,color,isOwner){
+  const actions=!isOwner?"":(
+    '<div class="team-player-actions">'+
+      (color!=="red"?'<button class="danger" onclick="setPlayerTeam(\''+player.id+'\',\'red\')">Red</button>':'')+
+      (color!=="green"?'<button class="primary" onclick="setPlayerTeam(\''+player.id+'\',\'green\')">Green</button>':'')+
+      (color?'<button class="secondary" onclick="setPlayerTeam(\''+player.id+'\',null)">Remove</button>':'')+
+    '</div>'
+  );
+  return '<div class="team-player"><b>'+escapeHtml(player.name)+'</b>'+actions+'</div>';
+}
+
+function renderTeamMaker(){
+  const redBox=document.getElementById("redTeamList");
+  const greenBox=document.getElementById("greenTeamList");
+  const unassignedBox=document.getElementById("unassignedTeamPlayers");
+  const controls=document.getElementById("teamAdminControls");
+  const weekText=document.getElementById("teamMakerWeek");
+  if(!redBox||!greenBox||!unassignedBox)return;
+
+  const isOwner=!!(userId&&team&&team.owner_id===userId);
+  if(controls)controls.classList.toggle("hidden",!isOwner);
+
+  const data=assignedTeamData();
+  const unassigned=players.filter(player=>!data.assignedIds.has(String(player.id)));
+
+  if(weekText)weekText.textContent=week
+    ? formatGameDate(week.starts_on)+" • "+players.length+" player"+(players.length===1?"":"s")+" playing this week"
+    : "Select a week first.";
+
+  document.getElementById("redTeamCount").textContent="("+data.red.length+")";
+  document.getElementById("greenTeamCount").textContent="("+data.green.length+")";
+
+  redBox.innerHTML=data.red.length
+    ? data.red.map(player=>teamPlayerHtml(player,"red",isOwner)).join("")
+    : '<div class="muted">No players assigned.</div>';
+  greenBox.innerHTML=data.green.length
+    ? data.green.map(player=>teamPlayerHtml(player,"green",isOwner)).join("")
+    : '<div class="muted">No players assigned.</div>';
+
+  unassignedBox.innerHTML='<b>Waiting for a Team ('+unassigned.length+')</b>'+
+    (unassigned.length
+      ? unassigned.map(player=>teamPlayerHtml(player,null,isOwner)).join("")
+      : '<div class="muted" style="margin-top:6px">Everyone is assigned.</div>');
+}
+
+async function reloadTeamAssignments(){
+  teamAssignments=week
+    ? await api("/rest/v1/week_team_assignments?week_id=eq."+week.id+"&select=*&order=sort_order.asc")
+    : [];
+  renderTeamMaker();
+}
+
+async function setPlayerTeam(playerId,color){
+  if(!team||!week||!userId||team.owner_id!==userId)return;
+  const player=players.find(item=>String(item.id)===String(playerId));
+  if(!player)return alert("This player is not in this week's Yes list.");
+
+  try{
+    if(!color){
+      await api(
+        "/rest/v1/week_team_assignments?week_id=eq."+week.id+"&player_id=eq."+playerId,
+        {method:"DELETE"}
+      );
+    }else{
+      const sameColorCount=teamAssignments.filter(item=>item.color===color).length;
+      await api("/rest/v1/week_team_assignments?on_conflict=week_id,player_id",{
+        method:"POST",
+        prefer:"resolution=merge-duplicates,return=representation",
+        body:{
+          team_id:team.id,
+          week_id:week.id,
+          player_id:playerId,
+          color,
+          sort_order:sameColorCount,
+          created_by:userId,
+          updated_at:new Date().toISOString()
+        }
+      });
+    }
+    await reloadTeamAssignments();
+  }catch(error){
+    alert("Could not update the team: "+error.message);
+  }
+}
+
+async function autoSplitTeams(){
+  if(!team||!week||!userId||team.owner_id!==userId)return;
+  if(!players.length)return alert("No Yes players are available yet.");
+  if(teamAssignments.length&&!confirm("Replace the current Red and Green teams with a new automatic split?"))return;
+
+  const shuffled=[...players];
+  for(let index=shuffled.length-1;index>0;index--){
+    const randomIndex=Math.floor(Math.random()*(index+1));
+    [shuffled[index],shuffled[randomIndex]]=[shuffled[randomIndex],shuffled[index]];
+  }
+
+  const rows=shuffled.map((player,index)=>({
+    team_id:team.id,
+    week_id:week.id,
+    player_id:player.id,
+    color:index%2===0?"red":"green",
+    sort_order:Math.floor(index/2),
+    created_by:userId,
+    updated_at:new Date().toISOString()
+  }));
+
+  try{
+    await api("/rest/v1/week_team_assignments?on_conflict=week_id,player_id",{
+      method:"POST",
+      prefer:"resolution=merge-duplicates,return=representation",
+      body:rows
+    });
+    await reloadTeamAssignments();
+  }catch(error){
+    alert("Could not split the teams: "+error.message);
+  }
+}
+
+async function clearTeamAssignments(){
+  if(!team||!week||!userId||team.owner_id!==userId)return;
+  if(!teamAssignments.length)return;
+  if(!confirm("Clear the Red and Green teams for this week?"))return;
+  try{
+    await api("/rest/v1/week_team_assignments?week_id=eq."+week.id,{method:"DELETE"});
+    teamAssignments=[];
+    renderTeamMaker();
+  }catch(error){
+    alert("Could not clear the teams: "+error.message);
+  }
+}
+
+function teamShareText(){
+  const data=assignedTeamData();
+  return [
+    team?.name||"Weekly Soccer",
+    week?formatGameDate(week.starts_on):"",
+    "",
+    "🔴 RED TEAM ("+data.red.length+")",
+    ...(data.red.length?data.red.map((player,index)=>(index+1)+". "+player.name):["No players"]),
+    "",
+    "🟢 GREEN TEAM ("+data.green.length+")",
+    ...(data.green.length?data.green.map((player,index)=>(index+1)+". "+player.name):["No players"])
+  ].join("\n");
+}
+
+async function shareTeamsList(){
+  const data=assignedTeamData();
+  if(!data.red.length&&!data.green.length)return alert("Assign players to teams first.");
+  const text=teamShareText();
+  if(navigator.share){
+    try{
+      await navigator.share({title:"Red & Green Teams",text});
+      return;
+    }catch(error){
+      if(error?.name==="AbortError")return;
+    }
+  }
+  try{
+    await navigator.clipboard.writeText(text);
+    alert("Team list copied. You can paste it into WhatsApp.");
+  }catch(error){
+    prompt("Copy the team list:",text);
+  }
+}
+
+async function shareTeamsImage(){
+  const data=assignedTeamData();
+  if(!data.red.length&&!data.green.length)return alert("Assign players to teams first.");
+
+  const width=1080;
+  const pad=54;
+  const headerHeight=250;
+  const rowHeight=66;
+  const maxPlayers=Math.max(data.red.length,data.green.length,1);
+  const height=Math.max(850,headerHeight+190+maxPlayers*rowHeight);
+  const canvas=document.createElement("canvas");
+  canvas.width=width;
+  canvas.height=height;
+  const ctx=canvas.getContext("2d");
+  if(!ctx)return alert("Could not create the team image.");
+
+  ctx.fillStyle="#f3f6f3";
+  ctx.fillRect(0,0,width,height);
+  const gradient=ctx.createLinearGradient(0,0,width,headerHeight);
+  gradient.addColorStop(0,"#113d25");
+  gradient.addColorStop(1,"#168344");
+  ctx.fillStyle=gradient;
+  ctx.fillRect(0,0,width,headerHeight);
+
+  ctx.fillStyle="#ffffff";
+  ctx.font="800 52px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.fillText(fitReportText(ctx,team?.name||"Weekly Soccer",width-pad*2),pad,88);
+  ctx.font="700 31px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.fillStyle="#dff6e6";
+  ctx.fillText("RED & GREEN TEAMS",pad,145);
+  ctx.font="500 27px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.fillStyle="#ffffff";
+  ctx.fillText(week?formatGameDate(week.starts_on):"",pad,198);
+
+  const gap=24;
+  const columnWidth=(width-pad*2-gap)/2;
+  const top=292;
+  const listHeight=100+maxPlayers*rowHeight;
+  drawRoundRect(ctx,pad,top,columnWidth,listHeight,22,"#fff0f0");
+  drawRoundRect(ctx,pad+columnWidth+gap,top,columnWidth,listHeight,22,"#edf9f0");
+
+  ctx.font="800 31px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.fillStyle="#b52d2d";
+  ctx.fillText("RED TEAM ("+data.red.length+")",pad+24,top+50);
+  ctx.fillStyle="#14823b";
+  ctx.fillText("GREEN TEAM ("+data.green.length+")",pad+columnWidth+gap+24,top+50);
+
+  const drawList=(list,x,color)=>{
+    list.forEach((player,index)=>{
+      const y=top+100+index*rowHeight;
+      ctx.beginPath();
+      ctx.arc(x+14,y-8,8,0,Math.PI*2);
+      ctx.fillStyle=color;
+      ctx.fill();
+      ctx.fillStyle="#183421";
+      ctx.font="650 26px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+      ctx.fillText(fitReportText(ctx,(index+1)+". "+player.name,columnWidth-70),x+34,y);
+    });
+  };
+  drawList(data.red,pad+24,"#d94343");
+  drawList(data.green,pad+columnWidth+gap+24,"#159447");
+
+  ctx.fillStyle="#708078";
+  ctx.font="500 20px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+  ctx.fillText("Generated by Weekly Soccer",pad,height-38);
+
+  const blob=await new Promise(resolve=>canvas.toBlob(resolve,"image/png",1));
+  if(!blob)return alert("Could not create the team image.");
+  const filename="soccer-teams-"+(week?.starts_on||"week")+".png";
+
+  try{
+    const file=new File([blob],filename,{type:"image/png"});
+    if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
+      await navigator.share({title:"Red & Green Teams",text:"Soccer teams",files:[file]});
+      return;
+    }
+  }catch(error){
+    if(error?.name==="AbortError")return;
+  }
+
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement("a");
+  link.href=url;
+  link.download=filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),3000);
+  alert("Team image saved.");
 }
 
 async function changeWeek(weekId){
@@ -1111,7 +1420,7 @@ async function changeWeek(weekId){
   week=selected;
 
   try{
-    const [allPlayers,loadedPayments,loadedRoster,loadedRsvps,loadedExpenses]=await Promise.all([
+    const [allPlayers,loadedPayments,loadedRoster,loadedRsvps,loadedExpenses,loadedTeamAssignments]=await Promise.all([
       api(
         "/rest/v1/players?team_id=eq."+team.id+
         "&select=*"+
@@ -1120,7 +1429,8 @@ async function changeWeek(weekId){
       api("/rest/v1/payments?week_id=eq."+week.id+"&select=*"),
       api("/rest/v1/week_players?week_id=eq."+week.id+"&select=player_id"),
       api("/rest/v1/rsvps?week_id=eq."+week.id+"&select=*"),
-      api("/rest/v1/expenses?week_id=eq."+week.id+"&select=*&order=spent_on.desc,created_at.desc")
+      api("/rest/v1/expenses?week_id=eq."+week.id+"&select=*&order=spent_on.desc,created_at.desc"),
+      api("/rest/v1/week_team_assignments?week_id=eq."+week.id+"&select=*&order=sort_order.asc")
     ]);
 
     allTeamPlayers=allPlayers;
@@ -1128,6 +1438,7 @@ async function changeWeek(weekId){
     weekRoster=loadedRoster;
     rsvps=loadedRsvps;
     expenses=loadedExpenses;
+    teamAssignments=loadedTeamAssignments;
 
     players=paymentPlayersForWeek(allPlayers);
 
