@@ -172,6 +172,12 @@ button:disabled{opacity:.45}
 
 <div class="card hidden" id="adminCard">
   <div class="row"><b>Admin</b><button onclick="signOut()">Sign Out</button></div>
+  <section id="platformSignupPanel" class="hidden" aria-label="New admin registrations" style="margin-top:18px;padding:14px;border-radius:14px;background:#edf4ee">
+    <div class="row"><b>New Admin Signups</b><button class="secondary" type="button" onclick="refreshPlatformSignups()">Refresh</button></div>
+    <div id="platformSignupCount" class="status" style="margin-top:8px">Loading registrations…</div>
+    <div id="platformSignupDates" class="muted" style="margin-top:5px"></div>
+    <button id="platformSignupSeen" class="secondary hidden" type="button" style="margin-top:10px;width:100%" onclick="markPlatformSignupsSeen()">Mark New Signups Seen</button>
+  </section>
 
   <h3 style="margin-top:20px">Top Photo</h3>
   <div class="muted" style="margin-bottom:8px">Choose a photo from your phone or computer. It will appear at the top for everyone in this group.</div>
@@ -242,6 +248,7 @@ const SB_KEY="sb_publishable_Sk-be4OXcsyglT8HsEqngw_GLVQzZ-5";
 let accessToken=localStorage.getItem("ts_access_token")||"";
 let userId=localStorage.getItem("ts_user_id")||"";
 let team=null,week=null,weeks=[],players=[],allTeamPlayers=[],payments=[],weekRoster=[],rsvps=[],expenses=[],teamAssignments=[];
+let platformSignupSummary=null;
 let soundEnabled=localStorage.getItem("ts_sound")!=="off";
 let audioContext=null;
 let lastScrollSound=0;
@@ -977,14 +984,53 @@ async function load(){
     players=paymentPlayersForWeek(allPlayers);
 
     render();
+    if(team.id==="5e83360b-1b47-4600-a7dd-b1031e59940e"&&userId===team.owner_id){
+      refreshPlatformSignups();
+    }
   }catch(e){
     setStatus("Connection error: "+e.message,true);
     document.getElementById("weekText").textContent="Please refresh after checking the connection.";
   }
 }
 
+async function refreshPlatformSignups(){
+  if(!team||team.id!=="5e83360b-1b47-4600-a7dd-b1031e59940e"||userId!==team.owner_id)return;
+  const count=document.getElementById("platformSignupCount");
+  try{
+    const result=await api("/rest/v1/rpc/platform_signup_summary",{method:"POST",body:{}});
+    if(!result||!Array.isArray(result.recent))throw new Error("Signup summary unavailable");
+    platformSignupSummary=result;
+    const seenKey="ws_platform_signups_seen_"+userId;
+    if(!localStorage.getItem(seenKey)){
+      localStorage.setItem(seenKey,result.recent[0]?.joined_at||new Date().toISOString());
+    }
+    const seenAt=Date.parse(localStorage.getItem(seenKey));
+    const fresh=result.recent.filter(item=>Date.parse(item.joined_at)>seenAt).length;
+    count.textContent=Number(result.total||0)+" other admin group"+(Number(result.total)===1?"":"s")+
+      (fresh?" • "+fresh+" new":" • No new signups");
+    const dates=document.getElementById("platformSignupDates");
+    dates.textContent=result.recent.length
+      ? "Recent signup: "+new Date(result.recent[0].joined_at).toLocaleString()
+      : "No other admins have created a group yet.";
+    document.getElementById("platformSignupSeen").classList.toggle("hidden",!fresh);
+  }catch(error){
+    count.textContent="Could not load signups. Tap Refresh to try again.";
+    document.getElementById("platformSignupDates").textContent="";
+    document.getElementById("platformSignupSeen").classList.add("hidden");
+  }
+}
+
+function markPlatformSignupsSeen(){
+  if(!platformSignupSummary||!userId)return;
+  localStorage.setItem("ws_platform_signups_seen_"+userId,
+    platformSignupSummary.recent[0]?.joined_at||new Date().toISOString());
+  refreshPlatformSignups();
+}
+
 function render(){
   const paidIds=new Set(payments.map(x=>x.player_id));
+  const platformPanel=document.getElementById("platformSignupPanel");
+  if(platformPanel)platformPanel.classList.toggle("hidden",!(team?.id==="5e83360b-1b47-4600-a7dd-b1031e59940e"&&userId===team.owner_id));
   const appTitle=document.getElementById("appTitle");
   if(appTitle)appTitle.textContent="⚽ "+(team?.name||"Weekly Soccer");
   document.title=team?.name?team.name+" — Weekly Soccer":"Weekly Soccer";
@@ -2003,6 +2049,11 @@ async function markUnpaid(player_id){if(!week||!userId)return;try{await api("/re
 setupInstallExperience();
 setupSoundEffects();
 load();
+setInterval(()=>{
+  if(document.visibilityState==="visible"&&team?.id==="5e83360b-1b47-4600-a7dd-b1031e59940e"&&userId===team.owner_id){
+    refreshPlatformSignups();
+  }
+},60000);
 </script>
 </body>
 </html>
