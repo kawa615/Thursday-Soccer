@@ -909,6 +909,8 @@ async function calculateOpeningBalance(start){
   return Number(prev.opening_balance||0)+prevCollected-paidRent-prevOtherExpenses;
 }
 async function ensureTeamAndWeek(){
+  const previousWeekId=week?.id;
+  const previousTeamId=team?.id;
   if(userId){
     let owned=await api(
       "/rest/v1/teams?owner_id=eq."+encodeURIComponent(userId)+"&select=*&limit=1"
@@ -960,9 +962,13 @@ async function ensureTeamAndWeek(){
     weeks=created;
   }
 
-  week=weeks[0]||null;
+  week=(String(previousTeamId)===String(team.id)
+    ? weeks.find(item=>String(item.id)===String(previousWeekId))
+    : null)||weeks[0]||null;
 }
+let weekDataRequestId=0;
 async function load(){
+  const requestId=++weekDataRequestId;
   captureLoginFromUrl();clearExpiredSavedLogin();
   const recoveryMode=localStorage.getItem("ts_recovery_mode")==="1";
   document.getElementById("resetCard").classList.toggle("hidden",!recoveryMode);
@@ -973,6 +979,7 @@ async function load(){
 
   try{
     await ensureTeamAndWeek();
+    if(requestId!==weekDataRequestId)return;
 
     if(!team){
       setStatus("Welcome to Weekly Soccer");
@@ -994,6 +1001,7 @@ async function load(){
       week?api("/rest/v1/week_team_assignments?week_id=eq."+week.id+"&select=*&order=sort_order.asc"):Promise.resolve([])
     ]);
 
+    if(requestId!==weekDataRequestId)return;
     allTeamPlayers=allPlayers;
     payments=loadedPayments;
     weekRoster=loadedRoster;
@@ -1011,6 +1019,7 @@ async function load(){
       loadSharingAndBilling();
     }
   }catch(e){
+    if(requestId!==weekDataRequestId)return;
     setStatus("Connection error: "+e.message,true);
     document.getElementById("weekText").textContent="Please refresh after checking the connection.";
   }
@@ -1637,22 +1646,25 @@ async function changeWeek(weekId){
   const selected=weeks.find(w=>String(w.id)===String(weekId));
   if(!selected)return;
 
-  week=selected;
+  const requestId=++weekDataRequestId;
+  const selectedTeamId=team.id;
 
   try{
     const [allPlayers,loadedPayments,loadedRoster,loadedRsvps,loadedExpenses,loadedTeamAssignments]=await Promise.all([
       api(
-        "/rest/v1/players?team_id=eq."+team.id+
+        "/rest/v1/players?team_id=eq."+selectedTeamId+
         "&select=*"+
         "&order=created_at.asc"
       ),
-      api("/rest/v1/payments?week_id=eq."+week.id+"&select=*"),
-      api("/rest/v1/week_players?week_id=eq."+week.id+"&select=player_id"),
-      api("/rest/v1/rsvps?week_id=eq."+week.id+"&select=*"),
-      api("/rest/v1/expenses?week_id=eq."+week.id+"&select=*&order=spent_on.desc,created_at.desc"),
-      api("/rest/v1/week_team_assignments?week_id=eq."+week.id+"&select=*&order=sort_order.asc")
+      api("/rest/v1/payments?week_id=eq."+selected.id+"&select=*"),
+      api("/rest/v1/week_players?week_id=eq."+selected.id+"&select=player_id"),
+      api("/rest/v1/rsvps?week_id=eq."+selected.id+"&select=*"),
+      api("/rest/v1/expenses?week_id=eq."+selected.id+"&select=*&order=spent_on.desc,created_at.desc"),
+      api("/rest/v1/week_team_assignments?week_id=eq."+selected.id+"&select=*&order=sort_order.asc")
     ]);
 
+    if(requestId!==weekDataRequestId||String(team?.id)!==String(selectedTeamId))return;
+    week=selected;
     allTeamPlayers=allPlayers;
     payments=loadedPayments;
     weekRoster=loadedRoster;
@@ -1664,6 +1676,8 @@ async function changeWeek(weekId){
 
     render();
   }catch(e){
+    if(requestId!==weekDataRequestId)return;
+    document.getElementById("weekSelect").value=week?.id||"";
     alert(e.message);
   }
 }
