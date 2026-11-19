@@ -51,6 +51,15 @@ button:disabled{opacity:.45}
 .team-player-actions button{padding:6px 8px;font-size:12px}
 .team-unassigned{margin-top:12px;padding:12px;border-radius:14px;background:#f5f7f5}
 @media(max-width:520px){.team-grid{grid-template-columns:1fr}.pay-choice{grid-template-columns:1fr}}
+body.payment-only .app-brand,
+body.payment-only .soccer-hero,
+body.payment-only .sound-toggle,
+body.payment-only .install-toggle,
+body.payment-only .app > .card{display:none}
+body.payment-only #financeSummaryCard,
+body.payment-only #payCard{display:block}
+body.payment-only h1{font-size:28px;margin:12px 0 16px}
+body.payment-only .app{max-width:620px}
 </style>
 </head>
 <body>
@@ -63,13 +72,13 @@ button:disabled{opacity:.45}
 <button id="soundToggle" class="secondary sound-toggle" type="button" onclick="toggleSound(event)">🔊 Sound On</button>
 <button id="installButton" class="primary install-toggle" type="button" onclick="installWeeklySoccer()">📲 Install App</button>
 
-<div class="card">
+<div class="card" id="financeSummaryCard">
   <div id="summary" class="status">Loading...</div>
   <div id="weekText" class="muted"></div>
   <div id="financeCard" class="money-grid hidden">
     <div class="money-box"><span>Balance from Last Week</span><b id="openingBalance">$0</b></div>
     <div class="money-box"><span>This Week Collected</span><b id="collectedAmount">$0</b></div>
-    <div class="money-box"><span>Field Rent</span><b id="fieldRent">$120</b><div id="fieldRentStatus" class="muted"></div></div>
+    <div class="money-box"><span>Field Rent</span><b id="fieldRent">$140</b><div id="fieldRentStatus" class="muted"></div></div>
     <div class="money-box"><span>Other Expenses</span><b id="expenseAmount">$0</b></div>
     <div class="money-box"><span>New Balance</span><b id="newBalance">$0</b></div>
   </div>
@@ -263,6 +272,8 @@ button:disabled{opacity:.45}
 
 <script>
 const SB_URL="https://aacbfebgypzrnvgcrrta.supabase.co";
+const paymentOnlyView=new URLSearchParams(location.search).get("view")==="payment";
+if(paymentOnlyView)document.body.classList.add("payment-only");
 const SB_KEY="sb_publishable_Sk-be4OXcsyglT8HsEqngw_GLVQzZ-5";
 let accessToken=localStorage.getItem("ts_access_token")||"";
 let userId=localStorage.getItem("ts_user_id")||"";
@@ -951,7 +962,7 @@ async function ensureTeamAndWeek(){
         team_id:team.id,
         starts_on:start,
         label:start,
-        field_rent:120,
+        field_rent:140,
         field_rent_paid:false,
         poll_locked:false,
         opening_balance:0
@@ -1235,7 +1246,7 @@ function render(){
   const openingInput=document.getElementById("openingBalanceInput");
   const rentInput=document.getElementById("fieldRentInput");
   if(openingInput&&week)openingInput.value=Number(week.opening_balance||0);
-  if(rentInput&&week)rentInput.value=Number(week.field_rent||120);
+  if(rentInput&&week)rentInput.value=Number(week.field_rent||140);
 
   const collected=payments.reduce((sum,x)=>sum+Number(x.amount),0);
   const otherExpenses=expenses.reduce((sum,x)=>sum+Number(x.amount),0);
@@ -1769,7 +1780,7 @@ async function createOrOpenWeek(){
         team_id:team.id,
         starts_on:selectedDate,
         label:selectedDate,
-        field_rent:120,
+        field_rent:140,
         field_rent_paid:false,
         poll_locked:false,
         opening_balance:opening
@@ -2135,6 +2146,8 @@ async function copyGroupLink(){
   if(!team)return;
   const url=new URL(location.origin+location.pathname);
   url.searchParams.set("team",team.id);
+  url.searchParams.set("view","payment");
+  url.hash="payCard";
   const link=url.toString();
   try{
     await navigator.clipboard.writeText(link);
@@ -2222,7 +2235,11 @@ async function markPaid(player_id){if(!team||!week||!userId)return;try{await api
 async function markUnpaid(player_id){if(!week||!userId)return;try{await api("/rest/v1/payments?week_id=eq."+week.id+"&player_id=eq."+player_id,{method:"DELETE"});await load()}catch(e){alert(e.message)}}
 setupInstallExperience();
 setupSoundEffects();
-load();
+load().finally(()=>{
+  if(paymentOnlyView){
+    requestAnimationFrame(()=>document.getElementById("payCard")?.scrollIntoView({behavior:"smooth",block:"start"}));
+  }
+});
 setInterval(()=>{
   if(document.visibilityState==="visible"&&team?.id==="5e83360b-1b47-4600-a7dd-b1031e59940e"&&userId===team.owner_id){
     refreshPlatformManagement();
